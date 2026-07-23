@@ -6,6 +6,7 @@ struct WallhavenWallpaperApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .appShaderEffect()
                 .frame(minWidth: 720, minHeight: 560)
         }
         .modelContainer(for: WallpaperItem.self)
@@ -13,6 +14,7 @@ struct WallhavenWallpaperApp: App {
 
         Settings {
             AppSettingsView()
+                .appShaderEffect()
         }
     }
 }

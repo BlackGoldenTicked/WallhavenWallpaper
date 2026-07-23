@@ -47,7 +47,8 @@ struct ContentView: View {
     @State private var randomSeed: String?
     @State private var mainMode: MainPaneMode = .online
     @State private var showSidebar = true
-    @State private var showInspector = true
+    @State private var showInspector = false
+    @State private var showOnlineFilters = false
     @State private var isLoading = false
     @State private var isVideoWallpaperRunning = false
     @State private var isRotationRunning = false
@@ -56,6 +57,40 @@ struct ContentView: View {
     @State private var pendingDeleteID: String?
 
     private let service = WallhavenService()
+    private let resolutionOptions: [FilterOption] = [
+        .init(title: "不限", value: ""),
+        .init(title: "HD 1280x720", value: "1280x720"),
+        .init(title: "FHD 1920x1080", value: "1920x1080"),
+        .init(title: "WUXGA 1920x1200", value: "1920x1200"),
+        .init(title: "QHD 2560x1440", value: "2560x1440"),
+        .init(title: "WQXGA 2560x1600", value: "2560x1600"),
+        .init(title: "UWQHD 3440x1440", value: "3440x1440"),
+        .init(title: "4K 3840x2160", value: "3840x2160"),
+        .init(title: "4K 16:10", value: "3840x2400"),
+        .init(title: "竖屏 1080x1920", value: "1080x1920"),
+        .init(title: "竖屏 1440x2560", value: "1440x2560")
+    ]
+    private let ratioOptions: [FilterOption] = [
+        .init(title: "不限", value: ""),
+        .init(title: "16:9", value: "16x9"),
+        .init(title: "16:10", value: "16x10"),
+        .init(title: "21:9", value: "21x9"),
+        .init(title: "32:9", value: "32x9"),
+        .init(title: "4:3", value: "4x3"),
+        .init(title: "5:4", value: "5x4"),
+        .init(title: "1:1", value: "1x1"),
+        .init(title: "9:16", value: "9x16"),
+        .init(title: "10:16", value: "10x16")
+    ]
+    private let wallhavenColorOptions: [WallhavenColorOption] = [
+        .init(name: "红", value: "cc0000"), .init(name: "粉", value: "ea4c88"),
+        .init(name: "紫", value: "993399"), .init(name: "蓝", value: "0066cc"),
+        .init(name: "青", value: "0099cc"), .init(name: "绿", value: "77cc33"),
+        .init(name: "橄榄", value: "999900"), .init(name: "黄", value: "ffff00"),
+        .init(name: "橙", value: "ff9900"), .init(name: "棕", value: "996633"),
+        .init(name: "黑", value: "000000"), .init(name: "灰", value: "999999"),
+        .init(name: "浅灰", value: "cccccc"), .init(name: "白", value: "ffffff")
+    ]
 
     var body: some View {
         HStack(spacing: 0) {
@@ -271,147 +306,218 @@ struct ContentView: View {
 
     private var searchAndDownloadControls: some View {
         HStack(spacing: 10) {
-            Button {
-                Task { await loadPage(1, resetSeed: true) }
-            } label: {
-                Label("搜索", systemImage: "magnifyingglass")
+            if !onlineImages.isEmpty {
+                Button {
+                    guard !isLoading else { return }
+                    Task { await downloadImages(Array(onlineImages.prefix(downloadCount))) }
+                } label: {
+                    Label("下载本页", systemImage: "arrow.down.circle")
+                }
             }
-            .disabled(isLoading)
-
-            Button {
-                Task { await downloadImages(Array(onlineImages.prefix(downloadCount))) }
-            } label: {
-                Label("下载本页", systemImage: "arrow.down.circle")
-            }
-            .disabled(isLoading || onlineImages.isEmpty)
         }
     }
 
     private var onlineControls: some View {
-        ViewThatFits(in: .horizontal) {
-            onlineControlsWide
-            onlineControlsCompact
+        VStack(alignment: .leading, spacing: 6) {
+            onlinePrimaryBar
+            if showOnlineFilters {
+                onlineFilterGrid
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            onlineFilterSummary
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.background)
-    }
-
-    private var onlineControlsWide: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                controlGroup("来源") {
-                    HStack(spacing: 8) {
-                        listingPicker.frame(width: 145)
-                        queryField.frame(width: 260)
-                    }
-                }
-
-                controlGroup("排序") {
-                    HStack(spacing: 8) {
-                        sortingPicker.frame(width: 135)
-                        topRangePicker.frame(width: 115)
-                        orderToggle
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-
-            HStack(alignment: .top, spacing: 12) {
-                controlGroup("内容") {
-                    HStack(spacing: 8) {
-                        categoryToggles
-                        purityPicker.frame(width: 140)
-                    }
-                }
-
-                controlGroup("尺寸") {
-                    HStack(spacing: 8) {
-                        resolutionModePicker.frame(width: 100)
-                        resolutionField.frame(width: 112)
-                        ratiosField.frame(width: 122)
-                        colorField.frame(width: 90)
-                    }
-                }
-
-                controlGroup("下载") {
-                    Stepper("数量：\(downloadCount)", value: $downloadCount, in: 1...24)
-                        .frame(width: 118)
-                }
-
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private var onlineControlsCompact: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12) {
-                controlGroup("来源") {
-                    HStack(spacing: 8) {
-                        listingPicker.frame(width: 145)
-                        queryField.frame(width: 230)
-                    }
-                }
-
-                controlGroup("排序") {
-                    HStack(spacing: 8) {
-                        sortingPicker.frame(width: 135)
-                        topRangePicker.frame(width: 115)
-                        orderToggle
-                    }
-                }
-
-                controlGroup("内容") {
-                    HStack(spacing: 8) {
-                        categoryToggles
-                        purityPicker.frame(width: 140)
-                    }
-                }
-
-                controlGroup("尺寸") {
-                    HStack(spacing: 8) {
-                        resolutionModePicker.frame(width: 100)
-                        resolutionField.frame(width: 112)
-                        ratiosField.frame(width: 122)
-                        colorField.frame(width: 90)
-                    }
-                }
-
-                controlGroup("下载") {
-                    Stepper("数量：\(downloadCount)", value: $downloadCount, in: 1...24)
-                        .frame(width: 118)
-                }
-            }
-            .padding(.bottom, 2)
-        }
-    }
-
-    private func controlGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            content()
-        }
-        .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+        .background(.bar)
+        .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
     }
 
-    private var listingPicker: some View {
-        Picker("入口", selection: $listing) {
-            ForEach(WallhavenListing.allCases) { item in
-                Text(item.title).tag(item)
+    private var onlinePrimaryBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Label("在线", systemImage: "globe")
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 52, alignment: .leading)
+
+            HStack(spacing: 6) {
+                ForEach(WallhavenListing.allCases) { item in
+                    FilterChip(
+                        title: item.title,
+                        systemImage: item.systemImage,
+                        isSelected: listing == item
+                    ) {
+                        listing = item
+                        sorting = item.defaultSorting
+                        currentPage = 1
+                        randomSeed = nil
+                        if item != .search { query = "" }
+                    }
+                }
+            }
+
+            if listing == .search {
+                queryField
+                    .frame(minWidth: 260, idealWidth: 360, maxWidth: 520)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                guard !isLoading else { return }
+                Task { await loadPage(1, resetSeed: true) }
+            } label: {
+                Label(isLoading ? "搜索中" : "搜索", systemImage: "magnifyingglass")
+            }
+            .keyboardShortcut(.return, modifiers: .command)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+
+            Button {
+                showOnlineFilters.toggle()
+            } label: {
+                Label(showOnlineFilters ? "收起" : "筛选", systemImage: showOnlineFilters ? "chevron.up.circle" : "line.3.horizontal.decrease.circle")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var onlineFilterSummary: some View {
+        HStack(spacing: 6) {
+            Text(filterSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var onlineFilterGrid: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            compactFilterRow("排序", systemImage: "arrow.up.arrow.down") {
+                Picker("排序", selection: $orderDescending) {
+                    Label("倒序", systemImage: "arrow.down").tag(true)
+                    Label("正序", systemImage: "arrow.up").tag(false)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 128)
+            }
+
+            if sorting == .toplist {
+                compactFilterRow("Top", systemImage: "calendar") {
+                    HStack(spacing: 10) {
+                        Slider(value: topRangeSliderValue, in: 0...Double(TopRange.allCases.count - 1), step: 1)
+                            .frame(width: 220)
+                        Text(topRange.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 36, alignment: .leading)
+                    }
+                }
+            }
+
+            compactFilterRow("内容", systemImage: "checkmark.shield") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        Toggle("General", isOn: $includeGeneral)
+                        Toggle("Anime", isOn: $includeAnime)
+                        Toggle("People", isOn: $includePeople)
+                    }
+                    .toggleStyle(.checkbox)
+
+                    WrappingHStack(spacing: 6, rowSpacing: 6) {
+                        ForEach(PurityFilter.allCases) { option in
+                            if option != .all || allowNSFW {
+                                FilterChip(title: option.title, isSelected: purity == option) {
+                                    purity = option
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            compactFilterRow("分辨率", systemImage: "display") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("匹配", selection: $resolutionMode) {
+                        ForEach(ResolutionMode.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 118)
+
+                    WrappingHStack(spacing: 6, rowSpacing: 6) {
+                        ForEach(resolutionOptions, id: \.value) { option in
+                            FilterChip(title: option.title, isSelected: resolution == option.value) {
+                                resolution = option.value
+                            }
+                        }
+                    }
+                }
+            }
+
+            compactFilterRow("比例", systemImage: "rectangle.inset.filled") {
+                WrappingHStack(spacing: 6, rowSpacing: 6) {
+                    ForEach(ratioOptions, id: \.value) { option in
+                        FilterChip(title: option.title, isSelected: ratios == option.value) {
+                            ratios = option.value
+                        }
+                    }
+                }
+            }
+
+            compactFilterRow("颜色", systemImage: "paintpalette") {
+                WrappingHStack(spacing: 6, rowSpacing: 6) {
+                    FilterChip(title: "不限", isSelected: color.isEmpty) {
+                        color = ""
+                    }
+                    ForEach(wallhavenColorOptions) { option in
+                        ColorFilterChip(option: option, isSelected: color == option.value) {
+                            color = option.value
+                        }
+                    }
+                }
+            }
+
+            compactFilterRow("下载", systemImage: "arrow.down.circle") {
+                HStack(spacing: 10) {
+                    Slider(value: downloadCountSliderValue, in: 1...24, step: 1)
+                        .frame(width: 220)
+                    Text("\(downloadCount) 张")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .leading)
+                }
             }
         }
-        .onChange(of: listing) { _, newValue in
-            sorting = newValue.defaultSorting
-            currentPage = 1
-            randomSeed = nil
-            if newValue != .search { query = "" }
+    }
+
+    private func compactFilterRow<Content: View>(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+                .frame(width: 66, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.regularMaterial, in: Capsule())
+
+            content()
+                .padding(.top, 1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.separator.opacity(0.25))
+                .frame(height: 0.5)
+                .padding(.leading, 92)
         }
     }
 
@@ -419,7 +525,6 @@ struct ContentView: View {
         HStack(spacing: 4) {
             TextField("关键词 / 标签 / id:123 / @用户", text: $query)
                 .textFieldStyle(.roundedBorder)
-                .disabled(listing != .search)
                 .onSubmit { submitOnlineSearch() }
 
             if !query.isEmpty {
@@ -436,68 +541,6 @@ struct ContentView: View {
         }
     }
 
-    private var sortingPicker: some View {
-        Picker("排序", selection: $sorting) {
-            ForEach(WallhavenSorting.allCases) { item in
-                Text(item.title).tag(item)
-            }
-        }
-    }
-
-    private var orderToggle: some View {
-        Toggle("倒序", isOn: $orderDescending)
-            .toggleStyle(.switch)
-            .fixedSize()
-    }
-
-    private var topRangePicker: some View {
-        Picker("Top 范围", selection: $topRange) {
-            ForEach(TopRange.allCases) { item in
-                Text(item.title).tag(item)
-            }
-        }
-        .disabled(sorting != .toplist)
-    }
-
-    private var categoryToggles: some View {
-        HStack(spacing: 8) {
-            Toggle("General", isOn: $includeGeneral)
-            Toggle("Anime", isOn: $includeAnime)
-            Toggle("People", isOn: $includePeople)
-        }
-        .fixedSize()
-    }
-
-    private var purityPicker: some View {
-        Picker("纯净度", selection: $purity) {
-            ForEach(PurityFilter.allCases) { option in
-                if option != .all || allowNSFW {
-                    Text(option.title).tag(option)
-                }
-            }
-        }
-    }
-
-    private var resolutionModePicker: some View {
-        Picker("分辨率", selection: $resolutionMode) {
-            ForEach(ResolutionMode.allCases) { item in
-                Text(item.title).tag(item)
-            }
-        }
-    }
-
-    private var resolutionField: some View {
-        clearableField("1920x1080", text: $resolution)
-    }
-
-    private var ratiosField: some View {
-        clearableField("16x9,16x10", text: $ratios)
-    }
-
-    private var colorField: some View {
-        clearableField("颜色", text: $color)
-    }
-
     private var statusLabel: some View {
         Text(statusText)
             .font(.caption)
@@ -505,24 +548,53 @@ struct ContentView: View {
             .lineLimit(1)
     }
 
-    private func clearableField(_ placeholder: String, text: Binding<String>) -> some View {
-        HStack(spacing: 4) {
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { submitOnlineSearch() }
-
-            if !text.wrappedValue.isEmpty {
-                Button {
-                    text.wrappedValue = ""
-                    submitOnlineSearch()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("清空")
-            }
+    private var filterSummary: String {
+        var parts: [String] = [
+            sorting.title,
+            orderDescending ? "倒序" : "正序",
+            purity.title
+        ]
+        if sorting == .toplist {
+            parts.append(topRange.title)
         }
+        parts.append(resolutionLabel)
+        parts.append(ratioLabel)
+        if !color.isEmpty {
+            parts.append(colorLabel)
+        }
+        parts.append("\(downloadCount)张")
+        return parts.joined(separator: " · ")
+    }
+
+    private var resolutionLabel: String {
+        resolutionOptions.first { $0.value == resolution }?.title ?? resolution
+    }
+
+    private var ratioLabel: String {
+        ratioOptions.first { $0.value == ratios }?.title ?? ratios
+    }
+
+    private var colorLabel: String {
+        wallhavenColorOptions.first { $0.value == color }?.name ?? color
+    }
+
+    private var topRangeSliderValue: Binding<Double> {
+        Binding(
+            get: { Double(TopRange.allCases.firstIndex(of: topRange) ?? 0) },
+            set: { value in
+                let index = max(0, min(TopRange.allCases.count - 1, Int(value.rounded())))
+                topRange = TopRange.allCases[index]
+            }
+        )
+    }
+
+    private var downloadCountSliderValue: Binding<Double> {
+        Binding(
+            get: { Double(downloadCount) },
+            set: { value in
+                downloadCount = max(1, min(24, Int(value.rounded())))
+            }
+        )
     }
 
     private func submitOnlineSearch() {
@@ -1036,11 +1108,174 @@ struct ContentView: View {
 
             try modelContext.save()
             statusText = savedCount == 0 ? "没有新的候选壁纸" : "已下载 \(savedCount) 张"
-            mainMode = .gallery
         } catch {
             errorMessage = error.localizedDescription
             statusText = "下载失败"
         }
+    }
+}
+
+private extension WallhavenListing {
+    var systemImage: String {
+        switch self {
+        case .latest: "clock"
+        case .hot: "flame"
+        case .toplist: "chart.bar"
+        case .random: "shuffle"
+        case .search: "person.crop.circle.badge.magnifyingglass"
+        }
+    }
+}
+
+private struct FilterOption {
+    let title: String
+    let value: String
+}
+
+private struct WallhavenColorOption: Identifiable {
+    let name: String
+    let value: String
+
+    var id: String { value }
+
+    var color: Color {
+        Color(hex: value)
+    }
+}
+
+private struct FilterChip: View {
+    let title: String
+    var systemImage: String?
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .imageScale(.small)
+                }
+                Text(title)
+                    .lineLimit(1)
+            }
+            .font(.caption.weight(isSelected ? .semibold : .regular))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .foregroundStyle(isSelected ? .white : .primary)
+            .background(
+                isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(isSelected ? Color.clear : Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ColorFilterChip: View {
+    let option: WallhavenColorOption
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(option.color)
+                    .frame(width: 14, height: 14)
+                    .overlay {
+                        Circle()
+                            .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
+                    }
+                Text(option.name)
+                    .lineLimit(1)
+            }
+            .font(.caption.weight(isSelected ? .semibold : .regular))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .foregroundStyle(isSelected ? .white : .primary)
+            .background(
+                isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct WrappingHStack: Layout {
+    var spacing: CGFloat = 8
+    var rowSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = rows(proposal: proposal, subviews: subviews)
+        return CGSize(
+            width: proposal.width ?? rows.map(\.width).max() ?? 0,
+            height: rows.map(\.height).reduce(0, +) + CGFloat(max(0, rows.count - 1)) * rowSpacing
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = rows(proposal: ProposedViewSize(width: bounds.width, height: proposal.height), subviews: subviews)
+        var y = bounds.minY
+
+        for row in rows {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + rowSpacing
+        }
+    }
+
+    private func rows(proposal: ProposedViewSize, subviews: Subviews) -> [FlowRow] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [FlowRow] = []
+        var current = FlowRow()
+
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let proposedWidth = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+
+            if proposedWidth > maxWidth, !current.indices.isEmpty {
+                rows.append(current)
+                current = FlowRow()
+            }
+
+            current.indices.append(index)
+            current.width = current.width == 0 ? size.width : current.width + spacing + size.width
+            current.height = max(current.height, size.height)
+        }
+
+        if !current.indices.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    private struct FlowRow {
+        var indices: [Subviews.Index] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+}
+
+private extension Color {
+    init(hex: String) {
+        let scanner = Scanner(string: hex)
+        var value: UInt64 = 0
+        scanner.scanHexInt64(&value)
+        self.init(
+            red: Double((value >> 16) & 0xff) / 255.0,
+            green: Double((value >> 8) & 0xff) / 255.0,
+            blue: Double(value & 0xff) / 255.0
+        )
     }
 }
 
