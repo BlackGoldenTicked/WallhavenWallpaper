@@ -20,15 +20,13 @@ struct WallpaperWallItem: Identifiable, Hashable {
 enum MainPaneMode: String, CaseIterable, Identifiable {
     case online
     case gallery
-    case configuration
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .online: "在线结果"
+        case .online: "在线浏览"
         case .gallery: "本地图库"
-        case .configuration: "配置"
         }
     }
 
@@ -36,7 +34,6 @@ enum MainPaneMode: String, CaseIterable, Identifiable {
         switch self {
         case .online: "globe"
         case .gallery: "photo.on.rectangle"
-        case .configuration: "gearshape"
         }
     }
 }
@@ -145,7 +142,7 @@ struct WallpaperWallView: View {
     }
 
     private var topBar: some View {
-        VStack {
+        VStack(spacing: 0) {
             HStack(spacing: 14) {
                 Button(action: close) {
                     Image(systemName: "chevron.left")
@@ -164,17 +161,22 @@ struct WallpaperWallView: View {
 
                 Spacer()
 
-                Text("ESC 退出")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.42))
-
+                Image(systemName: "rectangle.grid.3x2")
+                    .foregroundStyle(.white.opacity(0.55))
                 Slider(value: $density, in: 180...420, step: 4)
                     .frame(width: 150)
+                    .help("调整壁纸密度")
+                    .accessibilityLabel("壁纸密度")
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background(.black.opacity(0.36), in: Capsule())
-            .padding(.top, 18)
+            .padding(.horizontal, 24)
+            .frame(height: 58)
+            .background(
+                LinearGradient(
+                    colors: [.black.opacity(0.82), .black.opacity(0.38), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
 
             Spacer()
         }
@@ -428,18 +430,30 @@ private struct FocusOverlay: View {
                     Button(action: favorite) {
                         Label("收藏", systemImage: item.tags.contains("favorite") ? "heart.fill" : "heart")
                     }
+                    .buttonStyle(.bordered)
+
                     Button(action: setWallpaper) {
                         Label(statusText.isEmpty ? "设置为壁纸" : statusText, systemImage: statusText.isEmpty ? "desktopcomputer" : "checkmark.circle")
                     }
+                    .buttonStyle(.borderedProminent)
+
                     Button(action: close) {
-                        Label("返回", systemImage: "xmark")
+                        Image(systemName: "xmark")
                     }
+                    .buttonStyle(.bordered)
+                    .help("返回壁纸墙")
                 }
-                .buttonStyle(.bordered)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .background(.regularMaterial, in: Capsule())
-                .padding(.bottom, 28)
+                .padding(.horizontal, 24)
+                .padding(.top, 36)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
+                .background(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.72)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
             }
         }
     }

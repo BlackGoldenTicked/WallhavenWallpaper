@@ -54,7 +54,7 @@ enum WallhavenListing: String, CaseIterable, Identifiable {
         case .hot: "Hot"
         case .toplist: "Toplist"
         case .random: "Random"
-        case .search: "Search"
+        case .search: "社区"
         }
     }
 

@@ -25,7 +25,8 @@ enum LocalImageLoader {
             guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
                 return NSImage(contentsOf: url)
             }
-            return NSImage(cgImage: cgImage, size: .zero)
+            // 必须带真实像素尺寸：size 为 .zero 会丢掉固有宽高比，.fit / .scaledToFit 会退化。
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         }.value
 
         if let image {

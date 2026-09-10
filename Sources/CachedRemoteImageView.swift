@@ -2,46 +2,13 @@ import AppKit
 import ImageIO
 import SwiftUI
 
-struct CachedRemoteImageView: View {
-    let url: URL
-    var maxPixelSize: CGFloat = 900
-
-    @State private var image: NSImage?
-    @State private var didFail = false
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle()
-                    .fill(.quaternary)
-                    .overlay {
-                        if didFail {
-                            Image(systemName: "photo")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ProgressView()
-                        }
-                    }
-            }
-        }
-        .task(id: url.absoluteString) {
-            await load()
-        }
-    }
-
-    private func load() async {
-        didFail = false
-        image = nil
-        let key = url.absoluteString
-
+/// 远程图片的完整加载链路：内存缓存 → 磁盘缓存 → 网络 → 降采样解码 → 回写两级缓存。
+/// 视图与预取共用，避免逻辑重复。
+enum RemoteImageLoader {
+    static func load(url: URL, maxPixelSize: CGFloat, referer: URL? = nil) async -> NSImage? {
+        let key = cacheKey(url: url, maxPixelSize: maxPixelSize)
         if let cachedImage = RemoteImageMemoryCache.shared.image(for: key) {
-            image = cachedImage
-            return
+            return cachedImage
         }
 
         do {
@@ -49,24 +16,29 @@ struct CachedRemoteImageView: View {
             if let cachedData = try await AppCacheStore.shared.cachedThumbnailData(for: url) {
                 data = cachedData
             } else {
-                data = try await fetchData()
+                data = try await fetch(url: url, referer: referer)
                 try await AppCacheStore.shared.storeThumbnailData(data, for: url)
             }
 
-            guard let decodedImage = await decodeImage(data) else {
-                didFail = true
-                return
-            }
-            RemoteImageMemoryCache.shared.set(decodedImage, for: key, cost: max(data.count, 1))
-            image = decodedImage
+            guard let decoded = await decode(data, maxPixelSize: maxPixelSize) else { return nil }
+            RemoteImageMemoryCache.shared.set(decoded.image, for: key, cost: decoded.pixelBytes)
+            return decoded.image
         } catch {
-            didFail = true
+            return nil
         }
     }
 
-    private func fetchData() async throws -> Data {
+    /// 同一 URL 的不同解码尺寸必须分开缓存，否则互相污染。
+    static func cacheKey(url: URL, maxPixelSize: CGFloat) -> String {
+        "\(url.absoluteString)@\(Int(maxPixelSize))"
+    }
+
+    private static func fetch(url: URL, referer: URL?) async throws -> Data {
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X) WallhavenWallpaper/1.0", forHTTPHeaderField: "User-Agent")
+        if let referer {
+            request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200..<300).contains(httpResponse.statusCode) {
@@ -75,26 +47,128 @@ struct CachedRemoteImageView: View {
         return data
     }
 
-    private func decodeImage(_ data: Data) async -> NSImage? {
-        let maxPixelSize = maxPixelSize
-        return await Task.detached(priority: .utility) {
+    /// 缓存成本按解码后字节数计，压缩体积会严重低估原图占用。
+    private static func decode(_ data: Data, maxPixelSize: CGFloat) async -> (image: NSImage, pixelBytes: Int)? {
+        await Task.detached(priority: .utility) {
             let options: [CFString: Any] = [
                 kCGImageSourceShouldCache: false
             ]
-            guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
-                return NSImage(data: data)
+
+            if let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) {
+                let thumbnailOptions: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize)
+                ]
+                if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) {
+                    // 必须带真实像素尺寸：size 为 .zero 会丢掉固有宽高比，.fit 模式下会退化成不可见。
+                    let size = NSSize(width: cgImage.width, height: cgImage.height)
+                    return (NSImage(cgImage: cgImage, size: size), cgImage.width * cgImage.height * 4)
+                }
             }
 
-            let thumbnailOptions: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize)
-            ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
-                return NSImage(data: data)
-            }
-            return NSImage(cgImage: cgImage, size: .zero)
+            guard let fallback = NSImage(data: data) else { return nil }
+            return (fallback, pixelBytes(of: fallback))
         }.value
+    }
+
+    private static func pixelBytes(of image: NSImage) -> Int {
+        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            return cgImage.width * cgImage.height * 4
+        }
+        return max(1, Int(image.size.width * image.size.height * 4))
+    }
+}
+
+struct CachedRemoteImageView: View {
+    let url: URL
+    var maxPixelSize: CGFloat = 700
+    var contentMode: ContentMode = .fill
+    var referer: URL?
+    /// 非空时在解码完成前显示转圈与提示；单张大图舞台用，缩略图条不用。
+    var loadingHint: String?
+
+    @State private var image: NSImage?
+    @State private var didFail = false
+    @State private var reloadToken = 0
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+                    .transition(.opacity)
+            } else {
+                placeholder
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: isLoaded)
+        .task(id: taskKey) {
+            await load()
+        }
+    }
+
+    /// .fit 用在暗色单图舞台上：加载期不铺灰底（否则会盖掉环境光背景），
+    /// 加载完成后占位整个让位给图片，clipShape / shadow 才能贴着图片而不是贴着舞台。
+    @ViewBuilder
+    private var placeholder: some View {
+        if contentMode == .fit {
+            Color.clear
+                .overlay { placeholderContent }
+        } else {
+            Rectangle()
+                .fill(.quaternary)
+                .overlay { placeholderContent }
+        }
+    }
+
+    @ViewBuilder
+    private var placeholderContent: some View {
+        if didFail {
+            VStack(spacing: 6) {
+                Image(systemName: "photo")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+
+                Text("无法加载")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Button("重试") {
+                    reloadToken += 1
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        } else if let loadingHint {
+            VStack(spacing: 8) {
+                ProgressView()
+
+                Text(loadingHint)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+    }
+
+    private var isLoaded: Bool {
+        image != nil
+    }
+
+    /// 尺寸随窗口变化、以及重试，都要能重新触发加载。
+    private var taskKey: String {
+        "\(RemoteImageLoader.cacheKey(url: url, maxPixelSize: maxPixelSize))#\(reloadToken)"
+    }
+
+    private func load() async {
+        didFail = false
+        image = nil
+        if let loaded = await RemoteImageLoader.load(url: url, maxPixelSize: maxPixelSize, referer: referer) {
+            image = loaded
+        } else {
+            didFail = true
+        }
     }
 }

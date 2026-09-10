@@ -7,14 +7,15 @@ struct WallhavenWallpaperApp: App {
         WindowGroup {
             ContentView()
                 .appShaderEffect()
-                .frame(minWidth: 720, minHeight: 560)
+                .frame(minWidth: 880, minHeight: 600)
         }
+        .defaultSize(width: 1280, height: 820)
         .modelContainer(for: WallpaperItem.self)
-        .windowStyle(.hiddenTitleBar)
 
         Settings {
             AppSettingsView()
                 .appShaderEffect()
         }
+        .modelContainer(for: WallpaperItem.self)
     }
 }
