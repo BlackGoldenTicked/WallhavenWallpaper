@@ -125,60 +125,65 @@ struct ContentView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                heroStage
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GeometryReader { rootProxy in
+            VStack(spacing: 0) {
+                ZStack {
+                    heroStage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                stageScrims
+                    stageScrims
 
-                VStack(spacing: 10) {
-                    topNavBar
+                    VStack(spacing: 10) {
+                        topNavBar
 
-                    if mainMode == .online {
-                        filterRow
+                        if mainMode == .online {
+                            filterRow
 
-                        if showOnlineFilters {
-                            onlineFilterDrawer
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
+                            if showOnlineFilters {
+                                onlineFilterDrawer
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
 
-                        if let onlineErrorMessage, !onlineBuffer.isEmpty {
-                            onlineWarningBanner(onlineErrorMessage)
-                                .transition(.opacity)
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
-
-                if hasBrowseItems {
-                    VStack(spacing: 14) {
-                        Spacer(minLength: 0)
-
-                        heroInfoBlock
-                            .padding(.horizontal, 22)
-
-                        if showFilmstrip {
-                            filmstrip
+                            if let onlineErrorMessage, !onlineBuffer.isEmpty {
+                                onlineWarningBanner(onlineErrorMessage)
+                                    .transition(.opacity)
+                            }
                         }
                     }
-                    .padding(.bottom, 12)
-                }
+                    .padding(.horizontal, 14)
+                    // 顶栏控件按标题栏安全区高度下沉：壁纸铺到红绿灯行，控件位置不变。
+                    .padding(.top, 14 + rootProxy.safeAreaInsets.top)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
 
-                // 箭头置于最顶层：窗口缩小时不被顶栏/信息块/缩略图条遮挡。
-                stageOverlays
+                    if hasBrowseItems {
+                        VStack(spacing: 14) {
+                            Spacer(minLength: 0)
+
+                            heroInfoBlock
+                                .padding(.horizontal, 22)
+
+                            if showFilmstrip {
+                                filmstrip
+                            }
+                        }
+                        .padding(.bottom, 12)
+                    }
+
+                    // 箭头置于最顶层：窗口缩小时不被顶栏/信息块/缩略图条遮挡。
+                    stageOverlays
+                }
+                .contentShape(Rectangle())
+                .onHover { isStageHovered = $0 }
+                .clipped()
+
+                Divider()
+
+                statusBar
             }
-            .contentShape(Rectangle())
-            .onHover { isStageHovered = $0 }
-            .clipped()
-
-            Divider()
-
-            statusBar
+            // 舞台与顶部渐变伸入标题栏安全区，红绿灯直接浮在壁纸上，整窗浑然一体。
+            .ignoresSafeArea(edges: .top)
         }
         .background(KeyCatcher(handler: handleKey))
         .overlay {
