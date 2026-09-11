@@ -492,55 +492,33 @@ struct ContentView: View {
         }
     }
 
-    /// 筛选主行：来源/搜索、摘要与动作单行排布，抽屉在其下展开。
+    /// 筛选区两行左对齐：类别胶囊行 + 动作胶囊行（抽屉在其下展开），水平间距统一。
     private var filterRow: some View {
-        ViewThatFits(in: .horizontal) {
-            filterRowContent(wrapped: false)
-            filterRowContent(wrapped: true)
-        }
-    }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                listingSelector
 
-    private func filterRowContent(wrapped: Bool) -> some View {
-        Group {
-            if wrapped {
-                VStack(alignment: .leading, spacing: 8) {
-                    modeSpecificControls
-
-                    HStack(spacing: 10) {
-                        filterSummaryLabel
-                        Spacer(minLength: 8)
-                        filterActions
-                    }
+                if listing == .search {
+                    queryField
+                        .frame(minWidth: 180, idealWidth: 280, maxWidth: 360)
                 }
-            } else {
-                HStack(alignment: .center, spacing: 10) {
-                    modeSpecificControls
-                    Spacer(minLength: 8)
 
-                    filterSummaryLabel
+                Spacer(minLength: 0)
+            }
 
-                    filterActions
-                }
+            HStack(spacing: 12) {
+                onlineActions
+
+                Spacer(minLength: 0)
+
+                filterSummaryLabel
             }
         }
     }
 
-    @ViewBuilder
-    private var modeSpecificControls: some View {
-        listingSelector
-
-        if listing == .search {
-            queryField
-                .frame(minWidth: 200, idealWidth: 320, maxWidth: 460)
-        }
-    }
-
-    private var filterActions: some View {
-        onlineActions
-    }
-
+    /// 动作胶囊行：下载/筛选/加载与类别行同款玻璃胶囊，左对齐等间距。
     private var onlineActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             Menu {
                 Button {
                     if let currentOnlineImage {
@@ -558,30 +536,45 @@ struct ContentView: View {
                 }
                 .disabled(browsedOnlineImages.isEmpty)
             } label: {
-                Label("下载", systemImage: "arrow.down.circle")
+                stagePill {
+                    Label("下载", systemImage: "arrow.down.circle")
+                }
             }
-            .menuStyle(.button)
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
             .disabled(isLoading)
 
             Button {
                 showOnlineFilters.toggle()
             } label: {
-                Label("筛选", systemImage: "line.3.horizontal.decrease")
-                    .symbolVariant(showOnlineFilters ? .fill : .none)
+                stagePill {
+                    Label("筛选", systemImage: "line.3.horizontal.decrease")
+                        .symbolVariant(showOnlineFilters ? .fill : .none)
+                }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
             .help(showOnlineFilters ? "收起筛选" : "展开筛选")
 
             Button {
                 guard !isLoading else { return }
                 Task { await loadPage(1, resetSeed: true) }
             } label: {
-                Label(isLoading ? "加载中" : primaryActionTitle, systemImage: listing == .search ? "magnifyingglass" : "arrow.clockwise")
+                stagePill {
+                    Label(isLoading ? "加载中" : primaryActionTitle, systemImage: listing == .search ? "magnifyingglass" : "arrow.clockwise")
+                }
             }
             .keyboardShortcut(.return, modifiers: .command)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
         }
+    }
+
+    /// 图上胶囊标签：类别与动作行共用的 pill 语言（深色玻璃胶囊 + 图标文字）。
+    private func stagePill<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .font(.body.weight(.medium))
+            .foregroundStyle(Color.white.opacity(0.92))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
     }
 
     /// 「下载已浏览的 N 张」：从缓冲区开头到当前张，取最后 downloadCount 张。
@@ -610,17 +603,24 @@ struct ContentView: View {
             .help(filterSummary)
     }
 
-    /// 来源用原生分段控件：比一排自定义芯片更紧凑，也和模式切换同一视觉语言。
+    /// 来源胶囊按钮行：玻璃胶囊 + 图标，选中反白，左对齐等间距（参考图样式）。
     private var listingSelector: some View {
-        Picker("来源", selection: $listing) {
+        HStack(spacing: 12) {
             ForEach(WallhavenListing.allCases) { item in
-                Text(item.title).tag(item)
+                Button {
+                    listing = item
+                } label: {
+                    Label(item.title, systemImage: item.systemImage)
+                        .font(.body.weight(listing == item ? .semibold : .medium))
+                        .foregroundStyle(listing == item ? Color.black : Color.white.opacity(0.92))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(listing == item ? AnyShapeStyle(Color.white) : AnyShapeStyle(.ultraThinMaterial), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(item.title)
             }
         }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .frame(width: 400)
-        .help("浏览来源")
         .onChange(of: listing) { _, item in
             sorting = item.defaultSorting
             currentPage = 1
