@@ -4,19 +4,19 @@ import SwiftUI
 
 /// 全局布局度量，避免各处重复的魔法数字。
 private enum LayoutMetrics {
-    static let cardCornerRadius: CGFloat = 10
+    static let cardCornerRadius: CGFloat = 12
     static let thumbnailRatio: CGFloat = 3 / 2
     /// 主图按舞台尺寸解码的上限，超过这个像素数对肉眼已无收益。
     static let heroMaxPixelCap: CGFloat = 2600
     static let ambientBlurRadius: CGFloat = 32
     static let ambientPixelSize: CGFloat = 120
-    static let filmstripCellWidth: CGFloat = 108
-    static let filmstripCellHeight: CGFloat = 68
-    static let filmstripSpacing: CGFloat = 10
+    static let filmstripCellWidth: CGFloat = 144
+    static let filmstripCellHeight: CGFloat = 96
+    static let filmstripSpacing: CGFloat = 12
     /// 横向 ScrollView 在竖向上是贪婪的，不钉死高度会和舞台对分空间。
-    static let filmstripHeight: CGFloat = 72
-    static let filmstripRemotePixelSize: CGFloat = 160
-    static let filmstripLocalPixelSize: CGFloat = 200
+    static let filmstripHeight: CGFloat = 102
+    static let filmstripRemotePixelSize: CGFloat = 220
+    static let filmstripLocalPixelSize: CGFloat = 280
     /// 距缓冲区末尾还剩这么多张时开始静默续页。
     static let loadMoreThreshold = 3
 
@@ -133,7 +133,7 @@ struct ContentView: View {
 
                     stageScrims
 
-                    VStack(spacing: 10) {
+                    VStack(spacing: 12) {
                         topNavBar
 
                         if mainMode == .online {
@@ -150,27 +150,27 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 16)
                     // 顶栏控件按标题栏安全区高度下沉：壁纸铺到红绿灯行，控件位置不变。
-                    .padding(.top, 14 + rootProxy.safeAreaInsets.top)
-                    .padding(.bottom, 8)
+                    .padding(.top, 16 + rootProxy.safeAreaInsets.top)
+                    .padding(.bottom, 10)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
 
                     if hasBrowseItems {
-                        VStack(spacing: 14) {
+                        VStack(spacing: 16) {
                             Spacer(minLength: 0)
 
                             heroInfoBlock
-                                .padding(.horizontal, 22)
+                                .padding(.horizontal, 26)
 
                             if showFilmstrip {
                                 filmstrip
                             }
                         }
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 14)
                     }
-
+                    
                     // 箭头置于最顶层：窗口缩小时不被顶栏/信息块/缩略图条遮挡。
                     stageOverlays
                 }
@@ -226,14 +226,14 @@ struct ContentView: View {
     private var statusBar: some View {
         HStack(spacing: 10) {
             Text(statusText)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .layoutPriority(2)
 
             Text(positionText)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -242,7 +242,7 @@ struct ContentView: View {
             Spacer(minLength: 8)
 
             Text(keyboardHint)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.head)
@@ -252,8 +252,8 @@ struct ContentView: View {
                     .controlSize(.small)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(.bar)
         .contentTransition(.opacity)
     }
@@ -349,9 +349,9 @@ struct ContentView: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("wallhaven-\(currentBrowseID ?? "")")
-                    .font(.callout.weight(.semibold))
+                    .font(.body.weight(.semibold))
                 Text(previewCaption)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
@@ -363,7 +363,7 @@ struct ContentView: View {
                     Button {
                         Task { await downloadImages([image]) }
                     } label: {
-                        navCircle(systemName: "arrow.down.circle", size: 32)
+                        navCircle(systemName: "arrow.down.circle", size: 36)
                     }
                     .buttonStyle(.plain)
                     .disabled(isDownloaded(image))
@@ -374,7 +374,7 @@ struct ContentView: View {
                     Button {
                         setDesktopWallpaper(item)
                     } label: {
-                        navCircle(systemName: "desktopcomputer", size: 32)
+                        navCircle(systemName: "desktopcomputer", size: 36)
                     }
                     .buttonStyle(.plain)
                     .help("设为壁纸")
@@ -385,16 +385,16 @@ struct ContentView: View {
                 isWallpaperPreviewing = false
             } label: {
                 Text("退出预览")
-                    .font(.callout.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Color.black)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
                     .background(Color.white, in: Capsule())
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
         .background(.regularMaterial, in: Capsule())
         .overlay {
             Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
@@ -455,7 +455,7 @@ struct ContentView: View {
     }
 
     /// 玻璃圆按钮标签：图上操作的主控件语言，SettingsLink 与 Button 共用。
-    private func navCircle(systemName: String, filled: Bool = false, size: CGFloat = 30) -> some View {
+    private func navCircle(systemName: String, filled: Bool = false, size: CGFloat = 34) -> some View {
         Image(systemName: systemName)
             .symbolVariant(filled ? .fill : .none)
             .font(.system(size: size * 0.43, weight: .semibold))
@@ -475,17 +475,17 @@ struct ContentView: View {
                     mainMode = mode
                 } label: {
                     Text(mode.title)
-                        .font(.callout.weight(mainMode == mode ? .semibold : .regular))
+                        .font(.body.weight(mainMode == mode ? .semibold : .regular))
                         .foregroundStyle(mainMode == mode ? Color.black : Color.white.opacity(0.85))
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 6)
                         .background(mainMode == mode ? Color.white : Color.clear, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .help(mode.title)
             }
         }
-        .padding(3)
+        .padding(4)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay {
             Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
@@ -603,7 +603,7 @@ struct ContentView: View {
 
     private var filterSummaryLabel: some View {
         Label(filterSummary, systemImage: "slider.horizontal.3")
-            .font(.caption)
+            .font(.footnote)
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .truncationMode(.tail)
@@ -619,7 +619,7 @@ struct ContentView: View {
         }
         .labelsHidden()
         .pickerStyle(.segmented)
-        .frame(width: 336)
+        .frame(width: 400)
         .help("浏览来源")
         .onChange(of: listing) { _, item in
             sorting = item.defaultSorting
@@ -643,8 +643,8 @@ struct ContentView: View {
     /// 筛选抽屉：整块一个面板，左右两列、标签列定宽对齐，避免卡片高低错落留下空洞。
     private var onlineFilterDrawer: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 32) {
+                VStack(alignment: .leading, spacing: 16) {
                     filterRow("排序", systemImage: "arrow.up.arrow.down") {
                         HStack(spacing: 12) {
                             Picker("排序", selection: $orderDescending) {
@@ -653,15 +653,15 @@ struct ContentView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            .frame(width: 128)
+                            .frame(width: 148)
 
                             if sorting == .toplist {
                                 Slider(value: topRangeSliderValue, in: 0...Double(TopRange.allCases.count - 1), step: 1)
                                 Text(topRange.title)
-                                    .font(.caption.weight(.semibold))
+                                    .font(.footnote.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
-                                    .frame(width: 44, alignment: .leading)
+                                    .frame(width: 52, alignment: .leading)
                             }
                         }
                     }
@@ -675,7 +675,7 @@ struct ContentView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            .frame(width: 118)
+                            .frame(width: 136)
 
                             WrappingHStack(spacing: 6, rowSpacing: 6) {
                                 ForEach(resolutionOptions, id: \.value) { option in
@@ -701,7 +701,7 @@ struct ContentView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     filterRow("内容", systemImage: "checkmark.shield") {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 12) {
@@ -737,17 +737,17 @@ struct ContentView: View {
                         HStack(spacing: 12) {
                             Slider(value: downloadCountSliderValue, in: 1...24, step: 1)
                             Text("\(downloadCount) 张")
-                                .font(.caption.weight(.semibold))
+                                .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
-                                .frame(width: 44, alignment: .leading)
+                                .frame(width: 52, alignment: .leading)
                         }
                     }
                 }
             }
-            .padding(12)
+            .padding(14)
         }
-        .frame(maxHeight: 232)
+        .frame(maxHeight: 264)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -759,10 +759,10 @@ struct ContentView: View {
     private func filterRow<Content: View>(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 54, alignment: .leading)
-                .padding(.top, 5)
+                .frame(width: 62, alignment: .leading)
+                .padding(.top, 6)
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1015,7 +1015,7 @@ struct ContentView: View {
                 .controlSize(.large)
 
             Text(text)
-                .font(.callout)
+                .font(.body)
                 .foregroundStyle(.white.opacity(0.6))
         }
     }
@@ -1047,9 +1047,9 @@ struct ContentView: View {
     private func stageArrow(systemName: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(Color.white.opacity(disabled ? 0.3 : 0.9))
-                .frame(width: 46, height: 46)
+                .frame(width: 52, height: 52)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay {
                     Circle().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
@@ -1062,7 +1062,7 @@ struct ContentView: View {
 
     /// 左下信息块：徽章、编号、meta 与动作悬浮在底部渐变上（Wallspace 首页 hero 布局）。
     private var heroInfoBlock: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 if let currentPurity, currentPurity.lowercased() != "sfw" {
                     PurityBadge(purity: currentPurity)
@@ -1074,7 +1074,7 @@ struct ContentView: View {
             }
 
             Text("wallhaven-\(currentBrowseID ?? "")")
-                .font(.title2.weight(.bold))
+                .font(.title.weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
 
@@ -1085,11 +1085,11 @@ struct ContentView: View {
                     Text(ByteCountFormatter.string(fromByteCount: Int64(currentFileSize), countStyle: .file))
                 }
             }
-            .font(.caption.weight(.medium))
+            .font(.callout.weight(.medium))
             .foregroundStyle(.white.opacity(0.72))
 
             heroActions
-                .padding(.top, 2)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1106,17 +1106,17 @@ struct ContentView: View {
                     } label: {
                         Label(isDownloaded(image) ? "已下载" : "下载",
                               systemImage: isDownloaded(image) ? "checkmark.circle.fill" : "arrow.down.circle")
-                            .font(.callout.weight(.semibold))
+                            .font(.body.weight(.semibold))
                             .foregroundStyle(Color.black)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                             .background(Color.white, in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .disabled(isDownloaded(image) || isLoading)
 
                     Link(destination: image.url) {
-                        navCircle(systemName: "safari", size: 32)
+                        navCircle(systemName: "safari", size: 36)
                     }
                     .help("打开来源页")
                 }
@@ -1128,10 +1128,10 @@ struct ContentView: View {
                         setDesktopWallpaper(item)
                     } label: {
                         Label("设为壁纸", systemImage: "desktopcomputer")
-                            .font(.callout.weight(.semibold))
+                            .font(.body.weight(.semibold))
                             .foregroundStyle(Color.black)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                             .background(Color.white, in: Capsule())
                     }
                     .buttonStyle(.plain)
@@ -1139,7 +1139,7 @@ struct ContentView: View {
                     Button {
                         QuickLookPreviewer.shared.show(url: item.fileURL)
                     } label: {
-                        navCircle(systemName: "eye", size: 32)
+                        navCircle(systemName: "eye", size: 36)
                     }
                     .buttonStyle(.plain)
                     .help("快速预览")
@@ -1147,7 +1147,7 @@ struct ContentView: View {
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([item.fileURL])
                     } label: {
-                        navCircle(systemName: "folder", size: 32)
+                        navCircle(systemName: "folder", size: 36)
                     }
                     .buttonStyle(.plain)
                     .help("在 Finder 中显示")
@@ -1168,7 +1168,7 @@ struct ContentView: View {
                         localFilmstripCells
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
             }
             .frame(height: LayoutMetrics.filmstripHeight)
             .onChange(of: currentBrowseID) { _, id in
@@ -1294,8 +1294,8 @@ struct ContentView: View {
             .foregroundStyle(.secondary)
             .help("忽略此提示")
         }
-        .font(.callout)
-        .padding(10)
+        .font(.body)
+        .padding(12)
         .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
@@ -1754,9 +1754,9 @@ private struct FilterChip: View {
                 Text(title)
                     .lineLimit(1)
             }
-            .font(.caption.weight(isSelected ? .semibold : .regular))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .font(.footnote.weight(isSelected ? .semibold : .regular))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .background(chipBackground, in: Capsule())
             .overlay {
@@ -1787,7 +1787,7 @@ private struct ColorFilterChip: View {
             HStack(spacing: 6) {
                 Circle()
                     .fill(option.color)
-                    .frame(width: 14, height: 14)
+                    .frame(width: 16, height: 16)
                     .overlay {
                         Circle()
                             .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
@@ -1795,9 +1795,9 @@ private struct ColorFilterChip: View {
                 Text(option.name)
                     .lineLimit(1)
             }
-            .font(.caption.weight(isSelected ? .semibold : .regular))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .font(.footnote.weight(isSelected ? .semibold : .regular))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .background(chipBackground, in: Capsule())
             .overlay {
@@ -1990,11 +1990,11 @@ struct PurityBadge: View {
                 .frame(width: 6, height: 6)
 
             Text(purity.uppercased())
-                .font(.caption2.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3.5)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4.5)
         .foregroundStyle(.primary)
         .background(.regularMaterial, in: Capsule())
         .accessibilityLabel("类型 \(purity.uppercased())")
@@ -2031,11 +2031,11 @@ struct MetadataBadge: View {
                     .imageScale(.small)
             }
             Text(title)
-                .font(.caption2.weight(.medium))
+                .font(.caption.weight(.medium))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3.5)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4.5)
         .foregroundStyle(.primary)
         .background(.regularMaterial, in: Capsule())
     }
