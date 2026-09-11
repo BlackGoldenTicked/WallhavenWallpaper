@@ -168,7 +168,12 @@ struct ContentView: View {
                     }
                     .padding(.bottom, 12)
                 }
+
+                // 箭头置于最顶层：窗口缩小时不被顶栏/信息块/缩略图条遮挡。
+                stageOverlays
             }
+            .contentShape(Rectangle())
+            .onHover { isStageHovered = $0 }
             .clipped()
 
             Divider()
@@ -843,17 +848,14 @@ struct ContentView: View {
                     // 钉死主图容器并裁切：fill 图会上报超尺寸，不居中裁切会整体偏移露出左侧灰底。
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
-
-                stageOverlays
+                    // 切换动画只作用于主图，避免连带驱动悬浮箭头产生闪现/半显。
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: currentBrowseID)
             }
             // 钉死舞台尺寸：fill 图片会按自身宽高比上报超出舞台的尺寸，
             // 一旦撑大 ZStack，GeometryReader 的 topLeading 布局 + 居中对齐
             // 会让主图整体偏移、左侧露出背景灰（宽图切换时概率复现）。
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .contentShape(Rectangle())
             .preferredColorScheme(.dark)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: currentBrowseID)
-            .onHover { isStageHovered = $0 }
             .onAppear { stagePixelSize = heroPixelSize(for: proxy.size) }
             .onChange(of: proxy.size) { _, newSize in
                 stagePixelSize = heroPixelSize(for: newSize)
@@ -1029,6 +1031,8 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 10)
+            // 钉死铺满舞台：箭头始终垂直居中、贴左右边缘，不随窗口尺寸或 ZStack 子视图尺寸漂移/被裁。
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .opacity(isStageHovered ? 1 : 0)
             .animation(.easeOut(duration: 0.16), value: isStageHovered)
             .allowsHitTesting(isStageHovered)
