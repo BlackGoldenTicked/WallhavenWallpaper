@@ -1186,6 +1186,8 @@ struct ContentView: View {
         return ForEach(onlineBuffer) { image in
             FilmstripCell(isSelected: image.id == currentOnlineImage?.id) {
                 CachedRemoteImageView(url: image.thumbs.large, maxPixelSize: LayoutMetrics.filmstripRemotePixelSize)
+                    // 缩略图条不带揭示按钮，敏感图仅按设置模糊。
+                    .blur(radius: wallpaperBlurRadius(for: image.purity, enabled: blurNSFW))
             }
             .overlay(alignment: .bottomTrailing) {
                 if downloadedIDs.contains(image.id) {
@@ -1220,6 +1222,7 @@ struct ContentView: View {
             FilmstripCell(isSelected: item.wallhavenID == currentLocalItem?.wallhavenID) {
                 LocalImageView(url: item.fileURL, maxPixelSize: LayoutMetrics.filmstripLocalPixelSize)
                     .scaledToFill()
+                    .blur(radius: wallpaperBlurRadius(for: item.purity, enabled: blurNSFW))
             }
             .id(item.wallhavenID)
             // 不加 .draggable：其拖拽交互会吞掉单击，导致点击缩略图无法切换（拖拽仍保留在主图上）。
