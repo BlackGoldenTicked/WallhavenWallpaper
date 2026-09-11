@@ -6,30 +6,37 @@ import SwiftUI
 private enum LayoutMetrics {
     static let cardCornerRadius: CGFloat = 10
     static let thumbnailRatio: CGFloat = 3 / 2
-    static let heroCornerRadius: CGFloat = 12
-    static let heroPadding: CGFloat = 20
-    static let heroOverlayPadding: CGFloat = 28
     /// 主图按舞台尺寸解码的上限，超过这个像素数对肉眼已无收益。
     static let heroMaxPixelCap: CGFloat = 2600
     static let ambientBlurRadius: CGFloat = 32
     static let ambientPixelSize: CGFloat = 120
-    static let filmstripCellWidth: CGFloat = 84
-    static let filmstripCellHeight: CGFloat = 56
-    static let filmstripSpacing: CGFloat = 8
+    static let filmstripCellWidth: CGFloat = 108
+    static let filmstripCellHeight: CGFloat = 68
+    static let filmstripSpacing: CGFloat = 10
     /// 横向 ScrollView 在竖向上是贪婪的，不钉死高度会和舞台对分空间。
-    static let filmstripHeight: CGFloat = 80
+    static let filmstripHeight: CGFloat = 72
     static let filmstripRemotePixelSize: CGFloat = 160
     static let filmstripLocalPixelSize: CGFloat = 200
-    static let inspectorPreviewPixelSize: CGFloat = 900
     /// 距缓冲区末尾还剩这么多张时开始静默续页。
     static let loadMoreThreshold = 3
 
     static var cardShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
     }
+}
 
-    static var heroShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: heroCornerRadius, style: .continuous)
+/// 主区两种模式：在线浏览与本地图库，共用同一套单图浏览器与方向键逻辑。
+enum MainPaneMode: String, CaseIterable, Identifiable {
+    case online
+    case gallery
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .online: "在线浏览"
+        case .gallery: "本地图库"
+        }
     }
 }
 
@@ -57,8 +64,6 @@ struct ContentView: View {
     @AppStorage("color") private var color = ""
     @AppStorage("downloadCount") private var downloadCount = 24
     @AppStorage("rootPath") private var rootPath = WallhavenService.defaultRootDirectory.path
-    @State private var tagFilter = ""
-    @State private var selectedID: String?
     /// 累积缓冲区：按页追加而非替换，方向键逐张消费。
     @State private var onlineBuffer: [WallhavenImage] = []
     @State private var onlineIndex = 0
@@ -77,7 +82,6 @@ struct ContentView: View {
     @AppStorage("mainPaneMode") private var mainMode: MainPaneMode = .online
     @AppStorage("showFilmstrip") private var showFilmstrip = true
     @AppStorage("showOnlineFilters") private var showOnlineFilters = false
-    @State private var showInspector = false
     @State private var isLoading = false
     @State private var statusText = "就绪"
     @State private var errorMessage: String?
@@ -122,19 +126,50 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            filterBar
+            ZStack {
+                heroStage
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Divider()
+                stageScrims
 
-            heroStage
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
+                VStack(spacing: 10) {
+                    topNavBar
 
-            if showFilmstrip, hasBrowseItems {
-                Divider()
+                    if mainMode == .online {
+                        filterRow
 
-                filmstrip
+                        if showOnlineFilters {
+                            onlineFilterDrawer
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
+                        if let onlineErrorMessage, !onlineBuffer.isEmpty {
+                            onlineWarningBanner(onlineErrorMessage)
+                                .transition(.opacity)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
+
+                if hasBrowseItems {
+                    VStack(spacing: 14) {
+                        Spacer(minLength: 0)
+
+                        heroInfoBlock
+                            .padding(.horizontal, 22)
+
+                        if showFilmstrip {
+                            filmstrip
+                        }
+                    }
+                    .padding(.bottom, 12)
+                }
             }
+            .clipped()
 
             Divider()
 
@@ -144,40 +179,6 @@ struct ContentView: View {
         .overlay {
             wallpaperPreviewLayer
                 .animation(.easeOut(duration: 0.18), value: isWallpaperPreviewing)
-        }
-        .navigationTitle(mainMode.title)
-        .inspector(isPresented: $showInspector) {
-            detailPane
-                .inspectorColumnWidth(min: 300, ideal: 340, max: 480)
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 8) {
-                    Button {
-                        isWallpaperPreviewing.toggle()
-                    } label: {
-                        Image(systemName: "rectangle.on.rectangle")
-                            .symbolVariant(isWallpaperPreviewing ? .fill : .none)
-                    }
-                    .help(isWallpaperPreviewing ? "退出桌面预览" : "桌面壁纸预览")
-                    .disabled(currentBrowseID == nil)
-
-                    Button {
-                        showFilmstrip.toggle()
-                    } label: {
-                        Image(systemName: "film")
-                            .symbolVariant(showFilmstrip ? .fill : .none)
-                    }
-                    .help(showFilmstrip ? "隐藏缩略图条" : "显示缩略图条")
-
-                    Button {
-                        showInspector.toggle()
-                    } label: {
-                        Image(systemName: "sidebar.right")
-                    }
-                    .help(showInspector ? "隐藏详情" : "显示详情")
-                }
-            }
         }
         .alert("操作失败", isPresented: Binding(
             get: { errorMessage != nil },
@@ -203,20 +204,8 @@ struct ContentView: View {
         } message: {
             Text("会移除本地图库记录，并把图片文件移到废纸篓。")
         }
-        .onChange(of: tagFilter) { _, _ in
-            localIndex = 0
-        }
         .onChange(of: filteredItems.count) { _, count in
             localIndex = min(localIndex, max(0, count - 1))
-        }
-        .onChange(of: currentLocalItem?.wallhavenID) { _, id in
-            selectedID = id
-        }
-        .onChange(of: mainMode) { _, mode in
-            // 回到图库时检查器必须跟舞台对齐，而不是停在壁纸墙或设为壁纸留下的选择上。
-            if mode == .gallery {
-                selectedID = currentLocalItem?.wallhavenID
-            }
         }
         .task(id: prefetchKey) {
             await prefetchNext()
@@ -299,10 +288,23 @@ struct ContentView: View {
                 .clipped()
 
             VStack(spacing: 0) {
-                previewMenuBar
+                HStack {
+                    Spacer()
+
+                    Button {
+                        isWallpaperPreviewing = false
+                    } label: {
+                        navCircle(systemName: "xmark")
+                    }
+                    .buttonStyle(.plain)
+                    .help("退出预览 (Esc)")
+                }
+                .padding(14)
+
                 Spacer()
-                previewExitPill
-                    .padding(.bottom, 30)
+
+                previewControlBar
+                    .padding(.bottom, 26)
             }
         }
         .foregroundStyle(.white)
@@ -332,178 +334,199 @@ struct ContentView: View {
         }
     }
 
-    private var previewMenuBar: some View {
-        HStack(spacing: 12) {
-            Text("桌面壁纸预览")
-                .font(.callout.weight(.semibold))
+    /// 全屏预览底部悬浮胶囊条：信息 + 动作 + 退出，对应 Wallspace 全屏预览底栏。
+    private var previewControlBar: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("wallhaven-\(currentBrowseID ?? "")")
+                    .font(.callout.weight(.semibold))
+                Text(previewCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-            Text(previewCaption)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            Divider().frame(height: 24)
 
-            Spacer(minLength: 8)
+            switch mainMode {
+            case .online:
+                if let image = currentOnlineImage {
+                    Button {
+                        Task { await downloadImages([image]) }
+                    } label: {
+                        navCircle(systemName: "arrow.down.circle", size: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDownloaded(image))
+                    .help("下载")
+                }
+            case .gallery:
+                if let item = currentLocalItem {
+                    Button {
+                        setDesktopWallpaper(item)
+                    } label: {
+                        navCircle(systemName: "desktopcomputer", size: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .help("设为壁纸")
+                }
+            }
 
-            Text("Esc 退出")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
+            Button {
+                isWallpaperPreviewing = false
+            } label: {
+                Text("退出预览")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.white, in: Capsule())
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 26)
-        .background(.ultraThinMaterial)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+        }
     }
 
     private var previewCaption: String {
         switch mainMode {
         case .online:
             guard let image = currentOnlineImage else { return "" }
-            return "wallhaven-\(image.id) · \(image.resolution)"
+            return "\(image.resolution) · \(ByteCountFormatter.string(fromByteCount: Int64(image.fileSize), countStyle: .file))"
         case .gallery:
             guard let item = currentLocalItem else { return "" }
-            return "wallhaven-\(item.wallhavenID) · \(item.resolution)"
+            let size = item.fileSize > 0
+                ? " · \(ByteCountFormatter.string(fromByteCount: Int64(item.fileSize), countStyle: .file))"
+                : ""
+            return "\(item.resolution)\(size)"
         }
-    }
-
-    private var previewExitPill: some View {
-        HStack(spacing: 12) {
-            Label("仅模拟效果，不会修改系统桌面", systemImage: "info.circle")
-                .font(.callout)
-
-            Button("退出预览") {
-                isWallpaperPreviewing = false
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
     }
 
     // MARK: - 顶部筛选表单
 
-    private var filterBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                filterPrimaryBar
-                filterPrimaryBarWrapped
-            }
-
-            if mainMode == .online {
-                if showOnlineFilters {
-                    onlineFilterDrawer
-                        .padding(.top, 2)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                if let onlineErrorMessage, !onlineBuffer.isEmpty {
-                    onlineWarningBanner(onlineErrorMessage)
-                        .transition(.opacity)
-                }
-            }
+    /// 顶部导航悬浮在舞台上方：模式胶囊居中，玻璃圆按钮靠右（Wallspace 式顶栏）。
+    private var topNavBar: some View {
+        HStack {
+            Spacer(minLength: 0)
+            modePicker
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.bar)
-        .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
+        .overlay(alignment: .trailing) { navButtons }
     }
 
-    private var filterPrimaryBar: some View {
-        HStack(alignment: .center, spacing: 10) {
-            modePicker
-            Divider().frame(height: 18)
-            modeSpecificControls
-            Spacer(minLength: 8)
-
-            if mainMode == .online {
-                filterSummaryLabel
+    private var navButtons: some View {
+        HStack(spacing: 8) {
+            Button {
+                isWallpaperPreviewing.toggle()
+            } label: {
+                navCircle(systemName: "desktopcomputer", filled: isWallpaperPreviewing)
             }
+            .buttonStyle(.plain)
+            .help(isWallpaperPreviewing ? "退出桌面预览" : "桌面壁纸预览")
+            .disabled(currentBrowseID == nil)
 
-            Divider().frame(height: 18)
-            filterActions
-            Divider().frame(height: 18)
+            Button {
+                showFilmstrip.toggle()
+            } label: {
+                navCircle(systemName: "film", filled: showFilmstrip)
+            }
+            .buttonStyle(.plain)
+            .help(showFilmstrip ? "隐藏缩略图条" : "显示缩略图条")
 
             SettingsLink {
-                Image(systemName: "gearshape")
+                navCircle(systemName: "gearshape")
             }
+            .buttonStyle(.plain)
             .help("设置")
         }
     }
 
-    /// 窄窗口折行：模式与动作留在首行，来源 / 筛选条件换到第二行。
-    private var filterPrimaryBarWrapped: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                modePicker
-                Spacer(minLength: 8)
-                filterActions
-                Divider().frame(height: 18)
-
-                SettingsLink {
-                    Image(systemName: "gearshape")
-                }
-                .help("设置")
+    /// 玻璃圆按钮标签：图上操作的主控件语言，SettingsLink 与 Button 共用。
+    private func navCircle(systemName: String, filled: Bool = false, size: CGFloat = 30) -> some View {
+        Image(systemName: systemName)
+            .symbolVariant(filled ? .fill : .none)
+            .font(.system(size: size * 0.43, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(width: size, height: size)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay {
+                Circle().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
             }
+    }
 
-            modeSpecificControls
+    /// 模式切换：玻璃胶囊内的白-pill 分段，选中项反白。
+    private var modePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(MainPaneMode.allCases) { mode in
+                Button {
+                    mainMode = mode
+                } label: {
+                    Text(mode.title)
+                        .font(.callout.weight(mainMode == mode ? .semibold : .regular))
+                        .foregroundStyle(mainMode == mode ? Color.black : Color.white.opacity(0.85))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 5)
+                        .background(mainMode == mode ? Color.white : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(mode.title)
+            }
+        }
+        .padding(3)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
+        }
+    }
+
+    /// 筛选主行：来源/搜索、摘要与动作单行排布，抽屉在其下展开。
+    private var filterRow: some View {
+        ViewThatFits(in: .horizontal) {
+            filterRowContent(wrapped: false)
+            filterRowContent(wrapped: true)
+        }
+    }
+
+    private func filterRowContent(wrapped: Bool) -> some View {
+        Group {
+            if wrapped {
+                VStack(alignment: .leading, spacing: 8) {
+                    modeSpecificControls
+
+                    HStack(spacing: 10) {
+                        filterSummaryLabel
+                        Spacer(minLength: 8)
+                        filterActions
+                    }
+                }
+            } else {
+                HStack(alignment: .center, spacing: 10) {
+                    modeSpecificControls
+                    Spacer(minLength: 8)
+
+                    filterSummaryLabel
+
+                    filterActions
+                }
+            }
         }
     }
 
     @ViewBuilder
     private var modeSpecificControls: some View {
-        switch mainMode {
-        case .online:
-            listingSelector
+        listingSelector
 
-            if listing == .search {
-                queryField
-                    .frame(minWidth: 200, idealWidth: 320, maxWidth: 460)
-            }
-        case .gallery:
-            tagFilterField
-                .frame(width: 240)
+        if listing == .search {
+            queryField
+                .frame(minWidth: 200, idealWidth: 320, maxWidth: 460)
         }
     }
 
-    /// 侧栏移除后，在线与本地图库靠这个分段控件切换。
-    private var modePicker: some View {
-        Picker("模式", selection: $mainMode) {
-            ForEach(MainPaneMode.allCases) { mode in
-                Text(mode.title).tag(mode)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .frame(width: 176)
-    }
-
-    private var tagFilterField: some View {
-        HStack(spacing: 4) {
-            TextField("按标签筛选", text: $tagFilter)
-                .textFieldStyle(.roundedBorder)
-
-            if !tagFilter.isEmpty {
-                Button {
-                    tagFilter = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("清空标签筛选")
-            }
-        }
-    }
-
-    @ViewBuilder
     private var filterActions: some View {
-        switch mainMode {
-        case .online:
-            onlineActions
-        case .gallery:
-            galleryActions
-        }
+        onlineActions
     }
 
     private var onlineActions: some View {
@@ -548,27 +571,6 @@ struct ContentView: View {
             }
             .keyboardShortcut(.return, modifiers: .command)
             .buttonStyle(.borderedProminent)
-        }
-    }
-
-    private var galleryActions: some View {
-        HStack(spacing: 8) {
-            Button {
-                if let currentLocalItem {
-                    setDesktopWallpaper(currentLocalItem)
-                }
-            } label: {
-                Label("设为壁纸", systemImage: "desktopcomputer")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(currentLocalItem == nil)
-
-            Button {
-                openWallpaperWall()
-            } label: {
-                Label("壁纸墙", systemImage: "rectangle.grid.3x2")
-            }
-            .disabled(filteredItems.isEmpty)
         }
     }
 
@@ -736,13 +738,10 @@ struct ContentView: View {
             .padding(12)
         }
         .frame(maxHeight: 232)
-        .background(
-            Color(nsColor: .controlBackgroundColor).opacity(0.5),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(.separator.opacity(0.3), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 0.5)
         }
     }
 
@@ -841,9 +840,16 @@ struct ContentView: View {
                 stageBackground
 
                 stageContent(pixelSize: heroPixelSize(for: proxy.size))
+                    // 钉死主图容器并裁切：fill 图会上报超尺寸，不居中裁切会整体偏移露出左侧灰底。
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
 
                 stageOverlays
             }
+            // 钉死舞台尺寸：fill 图片会按自身宽高比上报超出舞台的尺寸，
+            // 一旦撑大 ZStack，GeometryReader 的 topLeading 布局 + 居中对齐
+            // 会让主图整体偏移、左侧露出背景灰（宽图切换时概率复现）。
+            .frame(width: proxy.size.width, height: proxy.size.height)
             .contentShape(Rectangle())
             .preferredColorScheme(.dark)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: currentBrowseID)
@@ -854,6 +860,30 @@ struct ContentView: View {
             }
         }
         .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    /// 舞台上下局部渐变：保证悬浮控件可读，又不在整张图上蒙均匀黑幕。
+    @ViewBuilder
+    private var stageScrims: some View {
+        LinearGradient(
+            colors: [Color.black.opacity(0.66), Color.black.opacity(0.32), .clear],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 230)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(false)
+
+        if hasBrowseItems {
+            LinearGradient(
+                colors: [.clear, Color.black.opacity(0.42), Color.black.opacity(0.72)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 300)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .allowsHitTesting(false)
+        }
     }
 
     /// 主图按舞台实际尺寸解码，窗口拉大后不会发虚；封顶避免无收益的超大解码。
@@ -912,14 +942,11 @@ struct ContentView: View {
                 CachedRemoteImageView(
                     url: image.path,
                     maxPixelSize: pixelSize,
-                    contentMode: .fit,
+                    contentMode: .fill,
                     referer: image.url,
                     loadingHint: "正在加载原图"
                 )
             }
-            .clipShape(LayoutMetrics.heroShape)
-            .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
-            .padding(LayoutMetrics.heroPadding)
             .id(image.id)
             .transition(.opacity)
             .onTapGesture(count: 2) {
@@ -936,11 +963,8 @@ struct ContentView: View {
         if let item = currentLocalItem {
             SensitiveImage(blurRadius: wallpaperBlurRadius(for: item.purity, enabled: blurNSFW)) {
                 LocalImageView(url: item.fileURL, maxPixelSize: pixelSize, showsPlaceholderBackground: false)
-                    .scaledToFit()
+                    .scaledToFill()
             }
-            .clipShape(LayoutMetrics.heroShape)
-            .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
-            .padding(LayoutMetrics.heroPadding)
             .id(item.wallhavenID)
             .transition(.opacity)
             .onTapGesture(count: 2) {
@@ -1008,36 +1032,29 @@ struct ContentView: View {
             .opacity(isStageHovered ? 1 : 0)
             .animation(.easeOut(duration: 0.16), value: isStageHovered)
             .allowsHitTesting(isStageHovered)
-
-            VStack {
-                heroTopBadges
-                Spacer()
-                heroBottomRow
-            }
-            .padding(LayoutMetrics.heroOverlayPadding)
         }
     }
 
     private func stageArrow(systemName: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 44, height: 96)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(disabled ? 0.3 : 0.9))
+                .frame(width: 46, height: 46)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+                }
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.white.opacity(disabled ? 0.25 : 0.85))
         .disabled(disabled)
         .help(help)
     }
 
-    private var heroTopBadges: some View {
-        HStack(alignment: .top) {
-            MetadataBadge(title: "wallhaven-\(currentBrowseID ?? "")")
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 6) {
+    /// 左下信息块：徽章、编号、meta 与动作悬浮在底部渐变上（Wallspace 首页 hero 布局）。
+    private var heroInfoBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
                 if let currentPurity, currentPurity.lowercased() != "sfw" {
                     PurityBadge(purity: currentPurity)
                 }
@@ -1046,82 +1063,86 @@ struct ContentView: View {
                     MetadataBadge(title: "已下载", systemImage: "checkmark.circle.fill")
                 }
             }
-        }
-    }
 
-    private var heroBottomRow: some View {
-        HStack(alignment: .bottom) {
-            HStack(spacing: 6) {
-                MetadataBadge(title: currentResolution)
+            Text("wallhaven-\(currentBrowseID ?? "")")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
 
-                if let currentCategory {
-                    MetadataBadge(title: currentCategory)
-                }
-
+            HStack(spacing: 12) {
+                Text(currentResolution)
+                if let currentCategory { Text(currentCategory) }
                 if let currentFileSize {
-                    MetadataBadge(title: ByteCountFormatter.string(fromByteCount: Int64(currentFileSize), countStyle: .file))
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(currentFileSize), countStyle: .file))
                 }
             }
-
-            Spacer(minLength: 12)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.white.opacity(0.72))
 
             heroActions
+                .padding(.top, 2)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// 图上动作：白-pill 主按钮 + 玻璃圆次按钮，替代原先的 bordered 按钮。
     @ViewBuilder
     private var heroActions: some View {
         switch mainMode {
         case .online:
             if let image = currentOnlineImage {
-                HStack(spacing: 8) {
-                    Link(destination: image.url) {
-                        Label("来源", systemImage: "safari")
-                    }
-
+                HStack(spacing: 10) {
                     Button {
                         Task { await downloadImages([image]) }
                     } label: {
                         Label(isDownloaded(image) ? "已下载" : "下载",
                               systemImage: isDownloaded(image) ? "checkmark.circle.fill" : "arrow.down.circle")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Color.black)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.white, in: Capsule())
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.plain)
                     .disabled(isDownloaded(image) || isLoading)
+
+                    Link(destination: image.url) {
+                        navCircle(systemName: "safari", size: 32)
+                    }
+                    .help("打开来源页")
                 }
-                .buttonStyle(.bordered)
             }
         case .gallery:
             if let item = currentLocalItem {
-                HStack(spacing: 8) {
-                    Button {
-                        toggleFavorite(item)
-                    } label: {
-                        Image(systemName: item.tags.contains("favorite") ? "heart.fill" : "heart")
-                    }
-                    .help(item.tags.contains("favorite") ? "取消收藏" : "收藏")
-
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([item.fileURL])
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .help("在 Finder 中显示")
-
-                    Button {
-                        QuickLookPreviewer.shared.show(url: item.fileURL)
-                    } label: {
-                        Image(systemName: "eye")
-                    }
-                    .help("快速预览")
-
+                HStack(spacing: 10) {
                     Button {
                         setDesktopWallpaper(item)
                     } label: {
                         Label("设为壁纸", systemImage: "desktopcomputer")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Color.black)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.white, in: Capsule())
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.plain)
+
+                    Button {
+                        QuickLookPreviewer.shared.show(url: item.fileURL)
+                    } label: {
+                        navCircle(systemName: "eye", size: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .help("快速预览")
+
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([item.fileURL])
+                    } label: {
+                        navCircle(systemName: "folder", size: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .help("在 Finder 中显示")
                 }
-                .buttonStyle(.bordered)
             }
         }
     }
@@ -1138,11 +1159,9 @@ struct ContentView: View {
                         localFilmstripCells
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 20)
             }
             .frame(height: LayoutMetrics.filmstripHeight)
-            .background(.bar)
             .onChange(of: currentBrowseID) { _, id in
                 guard let id else { return }
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
@@ -1194,6 +1213,7 @@ struct ContentView: View {
                     .scaledToFill()
             }
             .id(item.wallhavenID)
+            // 不加 .draggable：其拖拽交互会吞掉单击，导致点击缩略图无法切换（拖拽仍保留在主图上）。
             .onTapGesture {
                 jumpToLocal(item.wallhavenID)
             }
@@ -1224,7 +1244,6 @@ struct ContentView: View {
                     Label("移到废纸篓", systemImage: "trash")
                 }
             }
-            .draggable(item.fileURL)
             .accessibilityLabel("wallhaven-\(item.wallhavenID)，\(item.resolution)")
         }
     }
@@ -1416,17 +1435,6 @@ struct ContentView: View {
         localIndex = index
     }
 
-    private func toggleFavorite(_ item: WallpaperItem) {
-        var tags = item.tags
-        if tags.contains("favorite") {
-            tags.removeAll { $0 == "favorite" }
-        } else {
-            tags.append("favorite")
-        }
-        item.tagsText = tags.joined(separator: ", ")
-        try? modelContext.save()
-    }
-
     // MARK: - 预取
 
     /// 当前项、解码尺寸、缓冲区长度任一变化都重新评估预取目标。
@@ -1497,10 +1505,6 @@ struct ContentView: View {
                 showOnlineFilters = false
                 return true
             }
-            if showInspector {
-                showInspector = false
-                return true
-            }
             return false
         default:
             return false
@@ -1533,100 +1537,18 @@ struct ContentView: View {
         }
     }
 
-    /// 区分“图库为空”与“标签筛选无结果”，后者提供清除筛选的下一步。
-    @ViewBuilder
     private var galleryEmptyState: some View {
-        if items.isEmpty {
-            ContentUnavailableView {
-                Label("暂无壁纸", systemImage: "photo.on.rectangle")
-            } description: {
-                Text("在在线浏览中下载壁纸后会显示在这里")
-            } actions: {
-                Button("去在线浏览") {
-                    mainMode = .online
-                }
-                .buttonStyle(.borderedProminent)
+        ContentUnavailableView {
+            Label("暂无壁纸", systemImage: "photo.on.rectangle")
+        } description: {
+            Text("在在线浏览中下载壁纸后会显示在这里")
+        } actions: {
+            Button("去在线浏览") {
+                mainMode = .online
             }
-            .foregroundStyle(.white.opacity(0.85))
-        } else {
-            ContentUnavailableView {
-                Label("没有匹配的壁纸", systemImage: "magnifyingglass")
-            } description: {
-                Text("本地图库中没有标签包含“\(tagFilter)”的壁纸")
-            } actions: {
-                Button("清除筛选") {
-                    tagFilter = ""
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .foregroundStyle(.white.opacity(0.85))
+            .buttonStyle(.borderedProminent)
         }
-    }
-
-    @ViewBuilder
-    private var detailPane: some View {
-        if mainMode == .gallery, let selectedItem {
-            WallpaperDetailView(
-                item: selectedItem,
-                blurNSFW: blurNSFW,
-                preview: {
-                    QuickLookPreviewer.shared.show(url: selectedItem.fileURL)
-                },
-                revealInFinder: {
-                    NSWorkspace.shared.activateFileViewerSelecting([selectedItem.fileURL])
-                },
-                setWallpaper: { allScreens in
-                    setDesktopWallpaper(selectedItem, allScreens: allScreens)
-                },
-                delete: {
-                    pendingDeleteID = selectedItem.wallhavenID
-                }
-            )
-        } else if mainMode == .online, let image = currentOnlineImage {
-            OnlineDetailView(
-                image: image,
-                blurNSFW: blurNSFW,
-                isDownloaded: isDownloaded(image),
-                download: {
-                    Task { await downloadImages([image]) }
-                }
-            )
-        } else if mainMode == .online {
-            inspectorPlaceholder(
-                title: "暂无在线图片",
-                message: "加载壁纸后，可在这里查看当前这张的完整信息与下载入口"
-            )
-        } else {
-            inspectorPlaceholder(
-                title: "选择一张本地壁纸",
-                message: "可查看详情、编辑标签或设置为桌面壁纸"
-            )
-        }
-    }
-
-    /// 检查器空状态：窄列下自定义居中排版，避免图标与文案被压缩。
-    private func inspectorPlaceholder(title: String, message: String) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sidebar.right")
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(.tertiary)
-
-            Text(title)
-                .font(.headline)
-
-            Text(message)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var selectedItem: WallpaperItem? {
-        guard let selectedID else { return nil }
-        return items.first { $0.wallhavenID == selectedID }
+        .foregroundStyle(.white.opacity(0.85))
     }
 
     private var pendingDeleteItem: WallpaperItem? {
@@ -1634,12 +1556,9 @@ struct ContentView: View {
         return items.first { $0.wallhavenID == pendingDeleteID }
     }
 
+    /// 标签筛选移除后，本地图库直接展示全部已下载项。
     private var filteredItems: [WallpaperItem] {
-        let query = tagFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return items }
-        return items.filter { item in
-            item.tags.contains { $0.lowercased().contains(query) }
-        }
+        items
     }
 
     private var categoryValue: String {
@@ -1671,9 +1590,6 @@ struct ContentView: View {
             if FileManager.default.fileExists(atPath: item.fileURL.path) {
                 _ = try FileManager.default.trashItem(at: item.fileURL, resultingItemURL: nil)
             }
-            if selectedID == item.wallhavenID {
-                selectedID = nil
-            }
             modelContext.delete(item)
             try modelContext.save()
             statusText = "已移到废纸篓"
@@ -1685,42 +1601,10 @@ struct ContentView: View {
     private func setDesktopWallpaper(_ item: WallpaperItem, allScreens: Bool = false) {
         do {
             try service.setDesktopWallpaper(item.fileURL, onAllScreens: allScreens)
-            selectedID = item.wallhavenID
             statusText = allScreens ? "已设置为全部屏幕壁纸" : "已设置为当前屏幕壁纸"
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-
-    private func openWallpaperWall() {
-        WallpaperWallWindowController.shared.show(rootView: WallpaperWallView(
-            items: filteredItems.map(WallpaperWallItem.init),
-            blurNSFW: blurNSFW,
-            close: {
-                WallpaperWallWindowController.shared.close()
-            },
-            setWallpaper: { wallItem in
-                do {
-                    try service.setDesktopWallpaper(wallItem.fileURL)
-                    selectedID = wallItem.id
-                    statusText = "已设置为当前屏幕壁纸"
-                    return true
-                } catch {
-                    errorMessage = error.localizedDescription
-                    return false
-                }
-            },
-            toggleFavoriteAction: { id in
-                guard let item = items.first(where: { $0.wallhavenID == id }) else { return }
-                toggleFavorite(item)
-            },
-            select: { id in
-                selectedID = id
-                if let index = filteredItems.firstIndex(where: { $0.wallhavenID == id }) {
-                    localIndex = index
-                }
-            }
-        ))
     }
 
     /// append 为真时是自动续页，按 id 去重后追加到缓冲区且不动当前下标；
@@ -2031,125 +1915,14 @@ private struct FilmstripCell<Content: View>: View {
             .frame(width: LayoutMetrics.filmstripCellWidth, height: LayoutMetrics.filmstripCellHeight)
             .overlay {
                 LayoutMetrics.cardShape
-                    .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.12),
-                                  lineWidth: isSelected ? 2.5 : 1)
+                    .strokeBorder(isSelected ? Color.white : Color.white.opacity(0.2),
+                                  lineWidth: isSelected ? 2 : 1)
             }
-            .opacity(isSelected || isHovered ? 1 : 0.72)
+            .opacity(isSelected ? 1 : (isHovered ? 0.9 : 0.55))
+            .scaleEffect(isSelected ? 1.04 : 1)
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: 0.12), value: isHovered)
             .animation(.easeOut(duration: 0.12), value: isSelected)
-    }
-}
-
-/// 在线图片的检查器：字段全部来自搜索响应，不发起额外请求。
-private struct OnlineDetailView: View {
-    let image: WallhavenImage
-    let blurNSFW: Bool
-    let isDownloaded: Bool
-    let download: () -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                previewImage
-                detailActions
-                infoSection
-            }
-            .padding(14)
-        }
-    }
-
-    private var previewImage: some View {
-        ThumbnailBox {
-            SensitiveImage(blurRadius: wallpaperBlurRadius(for: image.purity, enabled: blurNSFW)) {
-                CachedRemoteImageView(url: image.path,
-                                      maxPixelSize: LayoutMetrics.inspectorPreviewPixelSize,
-                                      referer: image.url)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if image.purity.lowercased() != "sfw" {
-                PurityBadge(purity: image.purity)
-                    .padding(8)
-            }
-        }
-        .overlay {
-            LayoutMetrics.cardShape
-                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
-        }
-    }
-
-    private var detailActions: some View {
-        VStack(spacing: 8) {
-            Button(action: download) {
-                Label(isDownloaded ? "已在本地图库" : "下载", systemImage: isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(isDownloaded)
-
-            Link(destination: image.url) {
-                Label("打开来源页", systemImage: "safari")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private var infoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("信息")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                infoRow("分辨率", value: image.resolution)
-                infoRow("类型", value: image.purity.uppercased())
-                infoRow("分类", value: image.category.capitalized)
-                infoRow("大小", value: ByteCountFormatter.string(fromByteCount: Int64(image.fileSize), countStyle: .file))
-                infoRow("ID", value: image.id, isSelectable: true)
-
-                GridRow {
-                    Text("来源")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-
-                    Link("打开 Wallhaven 页面", destination: image.url)
-                        .font(.callout)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func infoRow(_ label: String, value: String, isSelectable: Bool = false) -> some View {
-        GridRow {
-            Text(label)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            infoValue(value, isSelectable: isSelectable)
-        }
-    }
-
-    /// 仅 ID 这类需要复制的值开启文本选择。
-    @ViewBuilder
-    private func infoValue(_ value: String, isSelectable: Bool) -> some View {
-        let text = Text(value)
-            .font(.callout)
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        if isSelectable {
-            text.textSelection(.enabled)
-        } else {
-            text
-        }
     }
 }
 
@@ -2195,163 +1968,6 @@ private struct KeyCatcher: NSViewRepresentable {
 
     func updateNSView(_ nsView: KeyCatcherView, context: Context) {
         nsView.handler = handler
-    }
-}
-
-struct WallpaperDetailView: View {
-    @Bindable var item: WallpaperItem
-    let blurNSFW: Bool
-    let preview: () -> Void
-    let revealInFinder: () -> Void
-    let setWallpaper: (Bool) -> Void
-    let delete: () -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                previewImage
-                wallpaperActions
-                infoSection
-                tagsSection
-
-                Divider()
-
-                Button(role: .destructive, action: delete) {
-                    Label("移到废纸篓", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(14)
-        }
-    }
-
-    private var previewImage: some View {
-        ThumbnailBox {
-            SensitiveImage(blurRadius: wallpaperBlurRadius(for: item.purity, enabled: blurNSFW)) {
-                LocalImageView(url: item.fileURL, maxPixelSize: 1400)
-                    .scaledToFill()
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if item.purity.lowercased() != "sfw" {
-                PurityBadge(purity: item.purity)
-                    .padding(8)
-            }
-        }
-        .overlay {
-            LayoutMetrics.cardShape
-                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
-        }
-        .onTapGesture(count: 2, perform: preview)
-        .help("双击快速预览")
-    }
-
-    /// 主动作（当前屏幕）突出，次级动作并排，删除独立到底部。
-    private var wallpaperActions: some View {
-        VStack(spacing: 8) {
-            Button {
-                setWallpaper(false)
-            } label: {
-                Label("设为壁纸", systemImage: "desktopcomputer")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-            HStack(spacing: 8) {
-                Button {
-                    setWallpaper(true)
-                } label: {
-                    Label("全部屏幕", systemImage: "rectangle.on.rectangle")
-                        .frame(maxWidth: .infinity)
-                }
-
-                Button(action: preview) {
-                    Label("预览", systemImage: "eye")
-                        .frame(maxWidth: .infinity)
-                }
-
-                Button(action: revealInFinder) {
-                    Label("Finder", systemImage: "folder")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private var infoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("信息")
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                infoRow("分辨率", value: item.resolution)
-                infoRow("类型", value: item.purity.uppercased())
-                infoRow("大小", value: ByteCountFormatter.string(fromByteCount: Int64(item.fileSize), countStyle: .file))
-                infoRow("下载时间", value: item.downloadedAt.formatted(date: .abbreviated, time: .shortened))
-                infoRow("ID", value: item.wallhavenID, isSelectable: true)
-
-                GridRow {
-                    Text("来源")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-
-                    Link("打开 Wallhaven 页面", destination: item.sourceURL)
-                        .font(.callout)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func infoRow(_ label: String, value: String, isSelectable: Bool = false) -> some View {
-        GridRow {
-            Text(label)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            infoValue(value, isSelectable: isSelectable)
-        }
-    }
-
-    /// 仅 ID 这类需要复制的值开启文本选择。
-    @ViewBuilder
-    private func infoValue(_ value: String, isSelectable: Bool) -> some View {
-        let text = Text(value)
-            .font(.callout)
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        if isSelectable {
-            text.textSelection(.enabled)
-        } else {
-            text
-        }
-    }
-
-    private var tagsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("标签")
-
-            TextField("标签，用逗号分隔", text: $item.tagsText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...3)
-
-            Text("用逗号分隔；favorite 会在图库显示星标")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
     }
 }
 

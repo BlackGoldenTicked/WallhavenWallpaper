@@ -93,6 +93,23 @@ struct CachedRemoteImageView: View {
     @State private var didFail = false
     @State private var reloadToken = 0
 
+    init(
+        url: URL,
+        maxPixelSize: CGFloat = 700,
+        contentMode: ContentMode = .fill,
+        referer: URL? = nil,
+        loadingHint: String? = nil
+    ) {
+        self.url = url
+        self.maxPixelSize = maxPixelSize
+        self.contentMode = contentMode
+        self.referer = referer
+        self.loadingHint = loadingHint
+        // 预取命中时用内存缓存同步兜底：切换/重建视图首帧即有图，避免空帧闪动。
+        let key = RemoteImageLoader.cacheKey(url: url, maxPixelSize: maxPixelSize)
+        _image = State(initialValue: RemoteImageMemoryCache.shared.image(for: key))
+    }
+
     var body: some View {
         ZStack {
             if let image {
@@ -110,18 +127,10 @@ struct CachedRemoteImageView: View {
         }
     }
 
-    /// .fit 用在暗色单图舞台上：加载期不铺灰底（否则会盖掉环境光背景），
-    /// 加载完成后占位整个让位给图片，clipShape / shadow 才能贴着图片而不是贴着舞台。
-    @ViewBuilder
+    /// 舞台背后是环境光模糊图，占位一律透明，避免加载/重载期间铺灰底盖掉背景。
     private var placeholder: some View {
-        if contentMode == .fit {
-            Color.clear
-                .overlay { placeholderContent }
-        } else {
-            Rectangle()
-                .fill(.quaternary)
-                .overlay { placeholderContent }
-        }
+        Color.clear
+            .overlay { placeholderContent }
     }
 
     @ViewBuilder
@@ -164,7 +173,7 @@ struct CachedRemoteImageView: View {
 
     private func load() async {
         didFail = false
-        image = nil
+        // 不清空旧图：窗口缩放触发重载时保留当前图，避免闪回占位造成灰底/闪动。
         if let loaded = await RemoteImageLoader.load(url: url, maxPixelSize: maxPixelSize, referer: referer) {
             image = loaded
         } else {
