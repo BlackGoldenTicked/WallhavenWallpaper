@@ -82,6 +82,18 @@ struct ContentView: View {
     @AppStorage("mainPaneMode") private var mainMode: MainPaneMode = .online
     @AppStorage("showFilmstrip") private var showFilmstrip = true
     @AppStorage("showOnlineFilters") private var showOnlineFilters = false
+    /// 筛选抽屉草稿：应用前不写设置，取消即丢弃。
+    @State private var draftOrderDescending = true
+    @State private var draftTopRange: TopRange = .oneMonth
+    @State private var draftResolutionMode: ResolutionMode = .atLeast
+    @State private var draftResolution = "1920x1080"
+    @State private var draftColor = ""
+    @State private var draftIncludeGeneral = true
+    @State private var draftIncludeAnime = true
+    @State private var draftIncludePeople = false
+    @State private var draftPurity: PurityFilter = .sfw
+    @State private var draftRatios = "16x9,16x10"
+    @State private var draftDownloadCount = 24
     @State private var isLoading = false
     @State private var statusText = "就绪"
     @State private var errorMessage: String?
@@ -138,12 +150,7 @@ struct ContentView: View {
 
                         if mainMode == .online {
                             filterRow
-
-                            if showOnlineFilters {
-                                onlineFilterDrawer
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
-
+                        
                             if let onlineErrorMessage, !onlineBuffer.isEmpty {
                                 onlineWarningBanner(onlineErrorMessage)
                                     .transition(.opacity)
@@ -155,7 +162,6 @@ struct ContentView: View {
                     .padding(.top, 16 + rootProxy.safeAreaInsets.top)
                     .padding(.bottom, 10)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .animation(.easeInOut(duration: 0.16), value: showOnlineFilters)
 
                     if hasBrowseItems {
                         VStack(spacing: 16) {
@@ -173,9 +179,16 @@ struct ContentView: View {
                     
                     // 箭头置于最顶层：窗口缩小时不被顶栏/信息块/缩略图条遮挡。
                     stageOverlays
+
+                    // 筛选面板最上层：左扩竖排，覆盖舞台左侧。
+                    if mainMode == .online && showOnlineFilters {
+                        filterDrawerPanel(topInset: rootProxy.safeAreaInsets.top)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
                 }
                 .contentShape(Rectangle())
                 .onHover { isStageHovered = $0 }
+                .animation(.easeInOut(duration: 0.22), value: showOnlineFilters)
                 .clipped()
 
                 Divider()
@@ -216,6 +229,9 @@ struct ContentView: View {
         }
         .onChange(of: filteredItems.count) { _, count in
             localIndex = min(localIndex, max(0, count - 1))
+        }
+        .onChange(of: showOnlineFilters) { _, showing in
+            if showing { syncFilterDrafts() }
         }
         .task(id: prefetchKey) {
             await prefetchNext()
@@ -506,13 +522,7 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 12) {
-                onlineActions
-
-                Spacer(minLength: 0)
-
-                filterSummaryLabel
-            }
+            onlineActions
         }
     }
 
@@ -594,15 +604,6 @@ struct ContentView: View {
         return downloadedIDs.contains(image.id)
     }
 
-    private var filterSummaryLabel: some View {
-        Label(filterSummary, systemImage: "slider.horizontal.3")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .help(filterSummary)
-    }
-
     /// 来源胶囊按钮行：玻璃胶囊 + 图标，选中反白，左对齐等间距（参考图样式）。
     private var listingSelector: some View {
         HStack(spacing: 12) {
@@ -640,82 +641,83 @@ struct ContentView: View {
         }
     }
 
-    /// 筛选抽屉：整块一个面板，左右两列、标签列定宽对齐，避免卡片高低错落留下空洞。
-    private var onlineFilterDrawer: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 32) {
-                VStack(alignment: .leading, spacing: 16) {
-                    filterRow("排序", systemImage: "arrow.up.arrow.down") {
-                        HStack(spacing: 12) {
-                            Picker("排序", selection: $orderDescending) {
+    /// 左扩竖排筛选面板：参考截图 UI/UX；草稿编辑，应用后才写设置并重新加载。
+    private func filterDrawerPanel(topInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            drawerHeader
+                .padding(.top, topInset)
+                .overlay(alignment: .bottom) { Divider() }
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 12) {
+                    sectionCard("排序", systemImage: "arrow.up.arrow.down", value: drawerSortingSummary) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("排序", selection: $draftOrderDescending) {
                                 Label("倒序", systemImage: "arrow.down").tag(true)
                                 Label("正序", systemImage: "arrow.up").tag(false)
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            .frame(width: 148)
 
                             if sorting == .toplist {
-                                Slider(value: topRangeSliderValue, in: 0...Double(TopRange.allCases.count - 1), step: 1)
-                                Text(topRange.title)
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                                    .frame(width: 52, alignment: .leading)
+                                HStack(spacing: 12) {
+                                    Slider(value: draftTopRangeSliderValue, in: 0...Double(TopRange.allCases.count - 1), step: 1)
+                                    Text(draftTopRange.title)
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                        .frame(width: 52, alignment: .leading)
+                                }
                             }
                         }
                     }
 
-                    filterRow("分辨率", systemImage: "display") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Picker("匹配", selection: $resolutionMode) {
+                    sectionCard("分辨率", systemImage: "display", value: drawerResolutionSummary) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("匹配", selection: $draftResolutionMode) {
                                 ForEach(ResolutionMode.allCases) { item in
                                     Text(item.title).tag(item)
                                 }
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            .frame(width: 136)
 
-                            WrappingHStack(spacing: 6, rowSpacing: 6) {
+                            WrappingHStack(spacing: 8, rowSpacing: 8) {
                                 ForEach(resolutionOptions, id: \.value) { option in
-                                    FilterChip(title: option.title, isSelected: resolution == option.value) {
-                                        resolution = option.value
+                                    DrawerChip(title: option.title, isSelected: draftResolution == option.value) {
+                                        draftResolution = option.value
                                     }
                                 }
                             }
                         }
                     }
 
-                    filterRow("颜色", systemImage: "paintpalette") {
-                        WrappingHStack(spacing: 6, rowSpacing: 6) {
-                            FilterChip(title: "不限", isSelected: color.isEmpty) {
-                                color = ""
+                    sectionCard("颜色", systemImage: "paintpalette", value: drawerColorSummary) {
+                        WrappingHStack(spacing: 8, rowSpacing: 8) {
+                            DrawerChip(title: "不限", isSelected: draftColor.isEmpty) {
+                                draftColor = ""
                             }
                             ForEach(wallhavenColorOptions) { option in
-                                ColorFilterChip(option: option, isSelected: color == option.value) {
-                                    color = option.value
+                                ColorSwatch(color: option.color, name: option.name, isSelected: draftColor == option.value) {
+                                    draftColor = option.value
                                 }
                             }
                         }
                     }
-                }
 
-                VStack(alignment: .leading, spacing: 16) {
-                    filterRow("内容", systemImage: "checkmark.shield") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 12) {
-                                Toggle("General", isOn: $includeGeneral)
-                                Toggle("Anime", isOn: $includeAnime)
-                                Toggle("People", isOn: $includePeople)
+                    sectionCard("内容", systemImage: "checkmark.shield", value: "已选 \([draftIncludeGeneral, draftIncludeAnime, draftIncludePeople].filter { $0 }.count) 项") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            WrappingHStack(spacing: 8, rowSpacing: 8) {
+                                DrawerChip(title: "General", isSelected: draftIncludeGeneral) { draftIncludeGeneral.toggle() }
+                                DrawerChip(title: "Anime", isSelected: draftIncludeAnime) { draftIncludeAnime.toggle() }
+                                DrawerChip(title: "People", isSelected: draftIncludePeople) { draftIncludePeople.toggle() }
                             }
-                            .toggleStyle(.checkbox)
 
-                            WrappingHStack(spacing: 6, rowSpacing: 6) {
+                            WrappingHStack(spacing: 8, rowSpacing: 8) {
                                 ForEach(PurityFilter.allCases) { option in
                                     if option != .all || allowNSFW {
-                                        FilterChip(title: option.title, isSelected: purity == option) {
-                                            purity = option
+                                        DrawerChip(title: option.title, isSelected: draftPurity == option) {
+                                            draftPurity = option
                                         }
                                     }
                                 }
@@ -723,56 +725,244 @@ struct ContentView: View {
                         }
                     }
 
-                    filterRow("比例", systemImage: "rectangle.inset.filled") {
-                        WrappingHStack(spacing: 6, rowSpacing: 6) {
+                    sectionCard("比例", systemImage: "rectangle.inset.filled", value: drawerRatioSummary) {
+                        // ratioOptions 首项已是「不限」（空值），不再另加芯片。
+                        WrappingHStack(spacing: 8, rowSpacing: 8) {
                             ForEach(ratioOptions, id: \.value) { option in
-                                FilterChip(title: option.title, isSelected: ratios == option.value) {
-                                    ratios = option.value
+                                DrawerChip(title: option.title, isSelected: draftRatios == option.value) {
+                                    draftRatios = option.value
                                 }
                             }
                         }
                     }
 
-                    filterRow("下载", systemImage: "arrow.down.circle") {
-                        HStack(spacing: 12) {
-                            Slider(value: downloadCountSliderValue, in: 1...24, step: 1)
-                            Text("\(downloadCount) 张")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .frame(width: 52, alignment: .leading)
-                        }
+                    sectionCard("下载", systemImage: "arrow.down.circle", value: "≥ \(draftDownloadCount) 张") {
+                        Slider(value: draftDownloadCountSliderValue, in: 1...24, step: 1)
                     }
                 }
+                .padding(14)
             }
-            .padding(14)
+
+            drawerFooter
+                .overlay(alignment: .top) { Divider() }
         }
-        .frame(maxHeight: 264)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 0.5)
+        .frame(width: 380)
+        .background(.regularMaterial)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(width: 0.5)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    /// 抽屉行：标签列定宽并顶到控件首行，两列内容的左边缘因此严格对齐。
-    private func filterRow<Content: View>(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.footnote.weight(.semibold))
+    /// 面板顶栏：标题、已选计数、重置与关闭（对应截图头部）。
+    private var drawerHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+
+            Text("筛选条件")
+                .font(.title3.weight(.semibold))
+
+            if selectedFilterCount > 0 {
+                Text("已选 \(selectedFilterCount)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.35), in: Capsule())
+            }
+
+            Spacer()
+
+            Button("重置") { resetFilterDrafts() }
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .frame(width: 62, alignment: .leading)
-                .padding(.top, 6)
+                .help("恢复默认筛选")
+
+            Button {
+                showOnlineFilters = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("关闭筛选 (Esc)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    /// 面板底栏：结果数、取消与应用（对应截图底部）。
+    private var drawerFooter: some View {
+        HStack(spacing: 10) {
+            Text("共 \(totalCount) 个结果")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button("取消") { showOnlineFilters = false }
+                .buttonStyle(.plain)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Color.white.opacity(0.9))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Color.white.opacity(0.08), in: Capsule())
+
+            Button {
+                applyFilterDrafts()
+            } label: {
+                Label("应用筛选", systemImage: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color.accentColor, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    /// 筛选卡片：标题 + 当前值摘要在上、控件在下（对应截图卡片）。
+    private func sectionCard<Content: View>(_ title: String, systemImage: String, value: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                    .font(.body.weight(.semibold))
+
+                Spacer()
+
+                Text(value)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             content()
-                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
         }
     }
 
+    private var drawerSortingSummary: String {
+        var text = "\(sorting.title) · \(draftOrderDescending ? "倒序" : "正序")"
+        if sorting == .toplist {
+            text += " · \(draftTopRange.title)"
+        }
+        return text
+    }
+
+    private var drawerResolutionSummary: String {
+        let res = resolutionOptions.first { $0.value == draftResolution }?.title ?? "不限"
+        return "\(draftResolutionMode.title) · \(res)"
+    }
+
+    private var drawerColorSummary: String {
+        wallhavenColorOptions.first { $0.value == draftColor }?.name ?? "不限"
+    }
+
+    private var drawerRatioSummary: String {
+        ratioOptions.first { $0.value == draftRatios }?.title ?? "不限"
+    }
+
+    /// 草稿中生效的筛选项计数，供顶栏徽章。
+    private var selectedFilterCount: Int {
+        var count = [draftIncludeGeneral, draftIncludeAnime, draftIncludePeople].filter { $0 }.count
+        if !draftResolution.isEmpty { count += 1 }
+        if !draftColor.isEmpty { count += 1 }
+        if !draftRatios.isEmpty { count += 1 }
+        if draftPurity != .sfw { count += 1 }
+        return count
+    }
+
+    private func syncFilterDrafts() {
+        draftOrderDescending = orderDescending
+        draftTopRange = topRange
+        draftResolutionMode = resolutionMode
+        draftResolution = resolution
+        draftColor = color
+        draftIncludeGeneral = includeGeneral
+        draftIncludeAnime = includeAnime
+        draftIncludePeople = includePeople
+        draftPurity = purity
+        draftRatios = ratios
+        draftDownloadCount = downloadCount
+    }
+
+    /// 应用：草稿写回设置、关面板并重载第一页。
+    private func applyFilterDrafts() {
+        orderDescending = draftOrderDescending
+        topRange = draftTopRange
+        resolutionMode = draftResolutionMode
+        resolution = draftResolution
+        color = draftColor
+        includeGeneral = draftIncludeGeneral
+        includeAnime = draftIncludeAnime
+        includePeople = draftIncludePeople
+        purity = draftPurity
+        ratios = draftRatios
+        downloadCount = draftDownloadCount
+        showOnlineFilters = false
+        Task { await loadPage(1, resetSeed: true) }
+    }
+
+    private func resetFilterDrafts() {
+        draftOrderDescending = true
+        draftTopRange = .oneMonth
+        draftResolutionMode = .atLeast
+        draftResolution = "1920x1080"
+        draftColor = ""
+        draftIncludeGeneral = true
+        draftIncludeAnime = true
+        draftIncludePeople = false
+        draftPurity = .sfw
+        draftRatios = "16x9,16x10"
+        draftDownloadCount = 24
+    }
+
+    private var draftTopRangeSliderValue: Binding<Double> {
+        Binding(
+            get: { Double(TopRange.allCases.firstIndex(of: draftTopRange) ?? 0) },
+            set: { value in
+                let index = max(0, min(TopRange.allCases.count - 1, Int(value.rounded())))
+                draftTopRange = TopRange.allCases[index]
+            }
+        )
+    }
+
+    private var draftDownloadCountSliderValue: Binding<Double> {
+        Binding(
+            get: { Double(draftDownloadCount) },
+            set: { value in
+                draftDownloadCount = max(1, min(24, Int(value.rounded())))
+            }
+        )
+    }
+
+    /// 搜索框：与类别胶囊同款深色玻璃胶囊，内边距/字号一致，高度对齐。
     private var queryField: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.body.weight(.medium))
+                .foregroundStyle(Color.white.opacity(0.6))
+
             TextField("关键词 / 标签 / id:123 / @用户", text: $query)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Color.white.opacity(0.92))
                 .onSubmit { submitOnlineSearch() }
 
             if !query.isEmpty {
@@ -783,58 +973,16 @@ struct ContentView: View {
                     Image(systemName: "xmark.circle.fill")
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.5))
                 .help("清空关键词")
             }
         }
-    }
-
-    private var filterSummary: String {
-        var parts: [String] = [
-            sorting.title,
-            orderDescending ? "倒序" : "正序",
-            purity.title
-        ]
-        if sorting == .toplist {
-            parts.append(topRange.title)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
         }
-        parts.append(resolutionLabel)
-        parts.append(ratioLabel)
-        if !color.isEmpty {
-            parts.append(colorLabel)
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private var resolutionLabel: String {
-        resolutionOptions.first { $0.value == resolution }?.title ?? resolution
-    }
-
-    private var ratioLabel: String {
-        ratioOptions.first { $0.value == ratios }?.title ?? ratios
-    }
-
-    private var colorLabel: String {
-        wallhavenColorOptions.first { $0.value == color }?.name ?? color
-    }
-
-    private var topRangeSliderValue: Binding<Double> {
-        Binding(
-            get: { Double(TopRange.allCases.firstIndex(of: topRange) ?? 0) },
-            set: { value in
-                let index = max(0, min(TopRange.allCases.count - 1, Int(value.rounded())))
-                topRange = TopRange.allCases[index]
-            }
-        )
-    }
-
-    private var downloadCountSliderValue: Binding<Double> {
-        Binding(
-            get: { Double(downloadCount) },
-            set: { value in
-                downloadCount = max(1, min(24, Int(value.rounded())))
-            }
-        )
     }
 
     private func submitOnlineSearch() {
@@ -1114,6 +1262,22 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isDownloaded(image) || isLoading)
+
+                    // 下载完成后才出现：设为壁纸依赖本地文件。
+                    if isDownloaded(image) {
+                        Button {
+                            setDownloadedImageAsWallpaper(image)
+                        } label: {
+                            Label("设为壁纸", systemImage: "desktopcomputer")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.white, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help("设为当前屏幕壁纸")
+                    }
 
                     Link(destination: image.url) {
                         navCircle(systemName: "safari", size: 36)
@@ -1619,6 +1783,12 @@ struct ContentView: View {
         }
     }
 
+    /// 已下载的在线图设为壁纸：按 wallhaven ID 定位本地条目后复用图库逻辑。
+    private func setDownloadedImageAsWallpaper(_ image: WallhavenImage) {
+        guard let item = items.first(where: { $0.wallhavenID == image.id }) else { return }
+        setDesktopWallpaper(item)
+    }
+
     /// append 为真时是自动续页，按 id 去重后追加到缓冲区且不动当前下标；
     /// 为假时是换来源 / 搜索 / 重试，缓冲区整个重建并回到第一张。
     @MainActor
@@ -1729,93 +1899,52 @@ private struct WallhavenColorOption: Identifiable {
     }
 }
 
-/// 胶囊筛选按钮：补充 .plain 样式缺失的按下反馈。
-private struct ChipButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.72 : 1)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private struct FilterChip: View {
+/// 抽屉圆角矩形芯片：选中态用 accent 描边 + 淡底（参考截图样式）。
+private struct DrawerChip: View {
     let title: String
-    var systemImage: String?
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .imageScale(.small)
+            Text(title)
+                .lineLimit(1)
+                .font(.footnote.weight(isSelected ? .semibold : .regular))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.8))
+                .background(isSelected ? Color.accentColor.opacity(0.35) : Color.white.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
                 }
-                Text(title)
-                    .lineLimit(1)
-            }
-            .font(.footnote.weight(isSelected ? .semibold : .regular))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .background(chipBackground, in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(isSelected ? Color.clear : Color.secondary.opacity(0.18), lineWidth: 1)
-            }
         }
-        .buttonStyle(ChipButtonStyle())
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
-    }
-
-    private var chipBackground: Color {
-        if isSelected { return Color.accentColor }
-        return isHovered ? Color.primary.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
+        .buttonStyle(.plain)
     }
 }
 
-private struct ColorFilterChip: View {
-    let option: WallhavenColorOption
+/// 主色调色块：圆角色块、选中白描边（参考截图样式）。
+private struct ColorSwatch: View {
+    let color: Color
+    let name: String
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(option.color)
-                    .frame(width: 16, height: 16)
-                    .overlay {
-                        Circle()
-                            .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
-                    }
-                Text(option.name)
-                    .lineLimit(1)
-            }
-            .font(.footnote.weight(isSelected ? .semibold : .regular))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .background(chipBackground, in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(isSelected ? Color.clear : Color.secondary.opacity(0.18), lineWidth: 1)
-            }
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(color)
+                .frame(width: 34, height: 34)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(isSelected ? Color.white : Color.white.opacity(0.15),
+                                      lineWidth: isSelected ? 2 : 0.5)
+                }
         }
-        .buttonStyle(ChipButtonStyle())
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
-    }
-
-    private var chipBackground: Color {
-        if isSelected { return Color.accentColor }
-        return isHovered ? Color.primary.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
+        .buttonStyle(.plain)
+        .help(name)
+        .accessibilityLabel(name)
     }
 }
 

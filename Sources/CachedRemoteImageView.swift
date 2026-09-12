@@ -5,7 +5,12 @@ import SwiftUI
 /// 远程图片的完整加载链路：内存缓存 → 磁盘缓存 → 网络 → 降采样解码 → 回写两级缓存。
 /// 视图与预取共用，避免逻辑重复。
 enum RemoteImageLoader {
-    static func load(url: URL, maxPixelSize: CGFloat, referer: URL? = nil) async -> NSImage? {
+    static func load(
+        url: URL,
+        maxPixelSize: CGFloat,
+        referer: URL? = nil,
+        onProgress: (@MainActor (Int64, Int64) -> Void)? = nil
+    ) async -> NSImage? {
         let key = cacheKey(url: url, maxPixelSize: maxPixelSize)
         if let cachedImage = RemoteImageMemoryCache.shared.image(for: key) {
             return cachedImage
@@ -16,7 +21,7 @@ enum RemoteImageLoader {
             if let cachedData = try await AppCacheStore.shared.cachedThumbnailData(for: url) {
                 data = cachedData
             } else {
-                data = try await fetch(url: url, referer: referer)
+                data = try await fetch(url: url, referer: referer, onProgress: onProgress)
                 try await AppCacheStore.shared.storeThumbnailData(data, for: url)
             }
 
@@ -33,18 +38,39 @@ enum RemoteImageLoader {
         "\(url.absoluteString)@\(Int(maxPixelSize))"
     }
 
-    private static func fetch(url: URL, referer: URL?) async throws -> Data {
+    /// 字节流下载并汇报进度（已下载、总大小，总大小未知时为 -1）。
+    private static func fetch(
+        url: URL,
+        referer: URL?,
+        onProgress: (@MainActor (Int64, Int64) -> Void)?
+    ) async throws -> Data {
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X) WallhavenWallpaper/1.0", forHTTPHeaderField: "User-Agent")
         if let referer {
             request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200..<300).contains(httpResponse.statusCode) {
             throw WallpaperError.badHTTPStatus(httpResponse.statusCode)
         }
-        return data
+
+        let total = response.expectedContentLength
+        var buffer: [UInt8] = []
+        if total > 0 { buffer.reserveCapacity(Int(total)) }
+        var received: Int64 = 0
+        var lastReported: Int64 = 0
+        for try await byte in bytes {
+            buffer.append(byte)
+            received += 1
+            // 每 128 KB 汇报一次，避免高频刷新主线程。
+            if received - lastReported >= 131_072 {
+                lastReported = received
+                await onProgress?(received, total)
+            }
+        }
+        await onProgress?(received, total)
+        return Data(buffer)
     }
 
     /// 缓存成本按解码后字节数计，压缩体积会严重低估原图占用。
@@ -92,6 +118,8 @@ struct CachedRemoteImageView: View {
     @State private var image: NSImage?
     @State private var didFail = false
     @State private var reloadToken = 0
+    @State private var receivedBytes: Int64 = 0
+    @State private var totalBytes: Int64 = 0
 
     init(
         url: URL,
@@ -158,6 +186,13 @@ struct CachedRemoteImageView: View {
                 Text(loadingHint)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.7))
+
+                if receivedBytes > 0 {
+                    Text(downloadProgressText)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .monospacedDigit()
+                }
             }
         }
     }
@@ -173,11 +208,28 @@ struct CachedRemoteImageView: View {
 
     private func load() async {
         didFail = false
+        receivedBytes = 0
+        totalBytes = 0
         // 不清空旧图：窗口缩放触发重载时保留当前图，避免闪回占位造成灰底/闪动。
-        if let loaded = await RemoteImageLoader.load(url: url, maxPixelSize: maxPixelSize, referer: referer) {
+        if let loaded = await RemoteImageLoader.load(
+            url: url,
+            maxPixelSize: maxPixelSize,
+            referer: referer,
+            onProgress: { received, total in
+                receivedBytes = received
+                totalBytes = total
+            }
+        ) {
             image = loaded
         } else {
             didFail = true
         }
+    }
+
+    /// 已下载/总大小；服务器未报 Content-Length 时只显示已下载。
+    private var downloadProgressText: String {
+        let received = ByteCountFormatter.string(fromByteCount: receivedBytes, countStyle: .file)
+        guard totalBytes > 0 else { return received }
+        return "\(received) / \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))"
     }
 }
