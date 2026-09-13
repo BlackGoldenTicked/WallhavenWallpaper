@@ -77,6 +77,13 @@ actor AppCacheStore {
         return try Data(contentsOf: fileURL)
     }
 
+    /// 已缓存原图文件的 URL（未命中或缓存关闭返回 nil）：供下载复用，直接本地拷贝免二次下载。
+    func cachedThumbnailFileURL(for url: URL) -> URL? {
+        guard AppCacheSettings.isEnabled else { return nil }
+        let fileURL = thumbnailFileURL(for: url)
+        return fileManager.fileExists(atPath: fileURL.path) ? fileURL : nil
+    }
+
     func storeThumbnailData(_ data: Data, for url: URL) throws {
         guard AppCacheSettings.isEnabled else { return }
         try fileManager.createDirectory(at: thumbnailDirectory, withIntermediateDirectories: true)

@@ -62,7 +62,6 @@ struct ContentView: View {
     @AppStorage("resolution") private var resolution = "1920x1080"
     @AppStorage("ratios") private var ratios = "16x9,16x10"
     @AppStorage("color") private var color = ""
-    @AppStorage("downloadCount") private var downloadCount = 24
     @AppStorage("rootPath") private var rootPath = WallhavenService.defaultRootDirectory.path
     /// 累积缓冲区：按页追加而非替换，方向键逐张消费。
     @State private var onlineBuffer: [WallhavenImage] = []
@@ -93,7 +92,6 @@ struct ContentView: View {
     @State private var draftIncludePeople = false
     @State private var draftPurity: PurityFilter = .sfw
     @State private var draftRatios = "16x9,16x10"
-    @State private var draftDownloadCount = 24
     @State private var isLoading = false
     @State private var statusText = "就绪"
     @State private var errorMessage: String?
@@ -526,33 +524,9 @@ struct ContentView: View {
         }
     }
 
-    /// 动作胶囊行：下载/筛选/加载与类别行同款玻璃胶囊，左对齐等间距。
+    /// 动作胶囊行：筛选/加载与类别行同款玻璃胶囊，左对齐等间距。
     private var onlineActions: some View {
         HStack(spacing: 12) {
-            Menu {
-                Button {
-                    if let currentOnlineImage {
-                        Task { await downloadImages([currentOnlineImage]) }
-                    }
-                } label: {
-                    Label("下载当前张", systemImage: "arrow.down")
-                }
-                .disabled(currentOnlineImage == nil || isDownloaded(currentOnlineImage))
-
-                Button {
-                    Task { await downloadImages(browsedOnlineImages) }
-                } label: {
-                    Label("下载已浏览的 \(browsedOnlineImages.count) 张", systemImage: "square.and.arrow.down")
-                }
-                .disabled(browsedOnlineImages.isEmpty)
-            } label: {
-                stagePill {
-                    Label("下载", systemImage: "arrow.down.circle")
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
-
             Button {
                 showOnlineFilters.toggle()
             } label: {
@@ -585,14 +559,6 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.ultraThinMaterial, in: Capsule())
-    }
-
-    /// 「下载已浏览的 N 张」：从缓冲区开头到当前张，取最后 downloadCount 张。
-    private var browsedOnlineImages: [WallhavenImage] {
-        guard !onlineBuffer.isEmpty else { return [] }
-        let upperBound = min(max(0, onlineIndex), onlineBuffer.count - 1)
-        let browsed = Array(onlineBuffer[0...upperBound])
-        return Array(browsed.suffix(min(downloadCount, browsed.count)))
     }
 
     private var downloadedIDs: Set<String> {
@@ -722,6 +688,21 @@ struct ContentView: View {
                                     }
                                 }
                             }
+
+                            // 设置页「筛选」面板已移除，NSFW 开关归位到此处统一配置。
+                            Toggle("允许 NSFW", isOn: $allowNSFW)
+                                .toggleStyle(.switch)
+                                .onChange(of: allowNSFW) { _, isAllowed in
+                                    if !isAllowed {
+                                        purity = .sfw
+                                        draftPurity = .sfw
+                                    }
+                                }
+
+                            if allowNSFW {
+                                Toggle("Sketchy / NSFW 默认模糊", isOn: $blurNSFW)
+                                    .toggleStyle(.switch)
+                            }
                         }
                     }
 
@@ -734,10 +715,6 @@ struct ContentView: View {
                                 }
                             }
                         }
-                    }
-
-                    sectionCard("下载", systemImage: "arrow.down.circle", value: "≥ \(draftDownloadCount) 张") {
-                        Slider(value: draftDownloadCountSliderValue, in: 1...24, step: 1)
                     }
                 }
                 .padding(14)
@@ -899,7 +876,6 @@ struct ContentView: View {
         draftIncludePeople = includePeople
         draftPurity = purity
         draftRatios = ratios
-        draftDownloadCount = downloadCount
     }
 
     /// 应用：草稿写回设置、关面板并重载第一页。
@@ -914,7 +890,6 @@ struct ContentView: View {
         includePeople = draftIncludePeople
         purity = draftPurity
         ratios = draftRatios
-        downloadCount = draftDownloadCount
         showOnlineFilters = false
         Task { await loadPage(1, resetSeed: true) }
     }
@@ -930,7 +905,6 @@ struct ContentView: View {
         draftIncludePeople = false
         draftPurity = .sfw
         draftRatios = "16x9,16x10"
-        draftDownloadCount = 24
     }
 
     private var draftTopRangeSliderValue: Binding<Double> {
@@ -939,15 +913,6 @@ struct ContentView: View {
             set: { value in
                 let index = max(0, min(TopRange.allCases.count - 1, Int(value.rounded())))
                 draftTopRange = TopRange.allCases[index]
-            }
-        )
-    }
-
-    private var draftDownloadCountSliderValue: Binding<Double> {
-        Binding(
-            get: { Double(draftDownloadCount) },
-            set: { value in
-                draftDownloadCount = max(1, min(24, Int(value.rounded())))
             }
         )
     }

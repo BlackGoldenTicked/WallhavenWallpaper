@@ -192,15 +192,21 @@ final class WallhavenService: @unchecked Sendable {
         grouping: DownloadGrouping,
         rootDirectory: URL
     ) async throws -> DownloadedWallpaper {
-        let (data, _) = try await data(from: image.path, referer: image.url)
-        guard !data.isEmpty else { throw WallpaperError.missingImageData }
-
         let directory = targetDirectory(rootDirectory: rootDirectory, grouping: grouping, date: Date())
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let fileName = "wallhaven-\(image.id)." + (image.path.pathExtension.isEmpty ? "jpg" : image.path.pathExtension)
         let localURL = directory.appendingPathComponent(fileName)
-        try data.write(to: localURL, options: .atomic)
+
+        // 浏览时原图已进磁盘缓存则直接本地拷贝，免二次下载；未命中才走网络。
+        if let cachedFileURL = await AppCacheStore.shared.cachedThumbnailFileURL(for: image.path) {
+            _ = try? FileManager.default.removeItem(at: localURL)
+            try FileManager.default.copyItem(at: cachedFileURL, to: localURL)
+        } else {
+            let (data, _) = try await data(from: image.path, referer: image.url)
+            guard !data.isEmpty else { throw WallpaperError.missingImageData }
+            try data.write(to: localURL, options: .atomic)
+        }
         return DownloadedWallpaper(image: image, localURL: localURL)
     }
 

@@ -4,37 +4,17 @@ import Foundation
 struct WallpaperRotationCandidate: Identifiable {
     let id: String
     let fileURL: URL
-    let tags: [String]
-    let purity: String
-    let width: Int
-    let height: Int
     let downloadedAt: Date
 
-    init?(_ item: WallpaperItem) {
-        let parts = item.resolution.split(separator: "x")
-        guard parts.count == 2,
-              let width = Int(parts[0]),
-              let height = Int(parts[1]) else {
-            return nil
-        }
-
+    init(_ item: WallpaperItem) {
         self.id = item.wallhavenID
         self.fileURL = item.fileURL
-        self.tags = item.tags.map { $0.lowercased() }
-        self.purity = item.purity.lowercased()
-        self.width = width
-        self.height = height
         self.downloadedAt = item.downloadedAt
     }
 }
 
 struct WallpaperRotationRule {
     var order: WallpaperRotationOrder
-    var requiredTags: String
-    var matchAllTags: Bool
-    var sfwOnly: Bool
-    var minWidth: Int
-    var minHeight: Int
     var allScreens: Bool
     var intervalMinutes: Int
 
@@ -49,7 +29,7 @@ enum WallpaperRotationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noCandidates: "没有符合规则的本地壁纸"
+        case .noCandidates: "没有可用的本地壁纸"
         case .noScreen: "找不到可用屏幕"
         }
     }
@@ -97,36 +77,13 @@ final class WallpaperRotationController {
 
     func rotateNow() throws {
         guard let rule else { throw WallpaperRotationError.noCandidates }
-        let filtered = filteredCandidates(from: candidates, rule: rule)
-        guard let next = nextCandidate(from: filtered, order: rule.order) else {
+        // 只剔除文件已不存在的条目，不再做自定义规则过滤。
+        let available = candidates.filter { FileManager.default.fileExists(atPath: $0.fileURL.path) }
+        guard let next = nextCandidate(from: available, order: rule.order) else {
             throw WallpaperRotationError.noCandidates
         }
         try setWallpaper(next.fileURL, allScreens: rule.allScreens)
         lastID = next.id
-    }
-
-    private func filteredCandidates(
-        from candidates: [WallpaperRotationCandidate],
-        rule: WallpaperRotationRule
-    ) -> [WallpaperRotationCandidate] {
-        let requiredTags = rule.requiredTags
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .filter { !$0.isEmpty }
-
-        return candidates.filter { candidate in
-            guard FileManager.default.fileExists(atPath: candidate.fileURL.path) else { return false }
-            if rule.sfwOnly && candidate.purity != "sfw" { return false }
-            if rule.minWidth > 0 && candidate.width < rule.minWidth { return false }
-            if rule.minHeight > 0 && candidate.height < rule.minHeight { return false }
-            guard !requiredTags.isEmpty else { return true }
-
-            if rule.matchAllTags {
-                return requiredTags.allSatisfy { candidate.tags.contains($0) }
-            } else {
-                return requiredTags.contains { candidate.tags.contains($0) }
-            }
-        }
     }
 
     private func nextCandidate(

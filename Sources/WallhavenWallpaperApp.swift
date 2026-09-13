@@ -17,6 +17,8 @@ struct WallhavenWallpaperApp: App {
         WindowGroup {
             ContentView()
                 .appShaderEffect()
+                // 浏览舞台是暗色玻璃语言，强制暗色保证胶囊/面板材质观感统一。
+                .preferredColorScheme(.dark)
                 .frame(minWidth: goldenWindowSize.width, minHeight: goldenWindowSize.height)
                 .onAppear(perform: centerFirstWindow)
         }
@@ -29,6 +31,8 @@ struct WallhavenWallpaperApp: App {
         Settings {
             AppSettingsView()
                 .appShaderEffect()
+                // 与在线/本地浏览页同款暗色风格，不随系统浅色外观切换。
+                .preferredColorScheme(.dark)
         }
         .modelContainer(for: WallpaperItem.self)
     }
