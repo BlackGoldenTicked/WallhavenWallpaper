@@ -231,6 +231,17 @@ struct ContentView: View {
         .onChange(of: showOnlineFilters) { _, showing in
             if showing { syncFilterDrafts() }
         }
+        .onChange(of: mainMode) { _, mode in
+            if mode == .online && onlineBuffer.isEmpty && !isLoading {
+                Task { await loadPage(1) }
+            }
+        }
+        .task {
+            // 首启进入在线浏览直接自动加载，不停在空状态。
+            if mainMode == .online && onlineBuffer.isEmpty && !isLoading {
+                await loadPage(1)
+            }
+        }
         .task(id: prefetchKey) {
             await prefetchNext()
         }
@@ -593,7 +604,12 @@ struct ContentView: View {
             currentPage = 1
             randomSeed = nil
             onlineErrorMessage = nil
-            if item != .search { query = "" }
+            if item != .search {
+                query = ""
+                // 切换类别即以默认筛选自动加载；社区搜索保持手动提交。
+                resetFiltersToDefaults()
+                Task { await loadPage(1, resetSeed: true) }
+            }
         }
     }
 
@@ -907,6 +923,20 @@ struct ContentView: View {
         draftRatios = "16x9,16x10"
     }
 
+    /// 切换类别 / 空结果回退时恢复默认筛选，保证各类型都有结果可载。
+    private func resetFiltersToDefaults() {
+        orderDescending = true
+        topRange = .oneMonth
+        resolutionMode = .atLeast
+        resolution = "1920x1080"
+        color = ""
+        includeGeneral = true
+        includeAnime = true
+        includePeople = false
+        purity = .sfw
+        ratios = "16x9,16x10"
+    }
+
     private var draftTopRangeSliderValue: Binding<Double> {
         Binding(
             get: { Double(TopRange.allCases.firstIndex(of: draftTopRange) ?? 0) },
@@ -1110,7 +1140,7 @@ struct ContentView: View {
                 onlineEmptyActions(primaryTitle: "重试")
             }
             .foregroundStyle(.white.opacity(0.85))
-        } else {
+        } else if listing == .search {
             ContentUnavailableView {
                 Label("暂无在线结果", systemImage: "photo.on.rectangle.angled")
             } description: {
@@ -1119,6 +1149,9 @@ struct ContentView: View {
                 onlineEmptyActions(primaryTitle: primaryActionTitle)
             }
             .foregroundStyle(.white.opacity(0.85))
+        } else {
+            // 非搜索类别不展示空状态：加载链路会自动以默认筛选兜底，此处仅瞬时过渡。
+            stageProgress("正在以默认筛选加载 Wallhaven")
         }
     }
 
@@ -1757,7 +1790,7 @@ struct ContentView: View {
     /// append 为真时是自动续页，按 id 去重后追加到缓冲区且不动当前下标；
     /// 为假时是换来源 / 搜索 / 重试，缓冲区整个重建并回到第一张。
     @MainActor
-    private func loadPage(_ page: Int, resetSeed: Bool = false, append: Bool = false) async {
+    private func loadPage(_ page: Int, resetSeed: Bool = false, append: Bool = false, allowDefaultFallback: Bool = true) async {
         isLoading = true
         if !append { onlineErrorMessage = nil }
         statusText = append ? "正在加载更多…" : "正在加载 Wallhaven 第 \(page) 页"
@@ -1778,6 +1811,13 @@ struct ContentView: View {
             totalCount = result.meta.total
             if sorting == .random || listing == .random {
                 randomSeed = result.meta.seed
+            }
+
+            // 非搜索类别空结果时回退默认筛选再试一次，避免停在空状态。
+            if !append, result.images.isEmpty, listing != .search, allowDefaultFallback {
+                resetFiltersToDefaults()
+                await loadPage(page, resetSeed: resetSeed, allowDefaultFallback: false)
+                return
             }
 
             if pendingAdvance {
