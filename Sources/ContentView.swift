@@ -353,13 +353,18 @@ struct ContentView: View {
         switch mainMode {
         case .online:
             if let image = currentOnlineImage {
-                CachedRemoteImageView(
-                    url: image.path,
-                    maxPixelSize: pixelSize,
-                    contentMode: .fill,
-                    referer: image.url,
-                    loadingHint: "正在加载原图"
-                )
+                if let localItem = localItem(for: image) {
+                    LocalImageView(url: localItem.fileURL, maxPixelSize: pixelSize, showsPlaceholderBackground: false)
+                        .scaledToFill()
+                } else {
+                    CachedRemoteImageView(
+                        url: image.path,
+                        maxPixelSize: pixelSize,
+                        contentMode: .fill,
+                        referer: image.url,
+                        loadingHint: "正在加载原图"
+                    )
+                }
             }
         case .gallery:
             if let item = currentLocalItem {
@@ -385,14 +390,25 @@ struct ContentView: View {
             switch mainMode {
             case .online:
                 if let image = currentOnlineImage {
-                    Button {
-                        Task { await downloadImages([image]) }
-                    } label: {
-                        navCircle(systemName: "arrow.down.circle", size: 36)
+                    if isDownloaded(image) {
+                        // 已下载：顶栏圆钮直接变为设为壁纸，与下载完成后的状态一致。
+                        Button {
+                            setDownloadedImageAsWallpaper(image)
+                        } label: {
+                            navCircle(systemName: "desktopcomputer", size: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .help("设为壁纸")
+                    } else {
+                        Button {
+                            Task { await downloadImages([image]) }
+                        } label: {
+                            navCircle(systemName: "arrow.down.circle", size: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isLoading)
+                        .help("下载")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isDownloaded(image))
-                    .help("下载")
                 }
             case .gallery:
                 if let item = currentLocalItem {
@@ -1089,13 +1105,19 @@ struct ContentView: View {
     private func onlineHero(pixelSize: CGFloat) -> some View {
         if let image = currentOnlineImage {
             SensitiveImage(blurRadius: wallpaperBlurRadius(for: image.purity, enabled: blurNSFW)) {
-                CachedRemoteImageView(
-                    url: image.path,
-                    maxPixelSize: pixelSize,
-                    contentMode: .fill,
-                    referer: image.url,
-                    loadingHint: "正在加载原图"
-                )
+                if let localItem = localItem(for: image) {
+                    // 已下载：原图直接读本地库文件，秒开且不走网络。
+                    LocalImageView(url: localItem.fileURL, maxPixelSize: pixelSize, showsPlaceholderBackground: false)
+                        .scaledToFill()
+                } else {
+                    CachedRemoteImageView(
+                        url: image.path,
+                        maxPixelSize: pixelSize,
+                        contentMode: .fill,
+                        referer: image.url,
+                        loadingHint: "正在加载原图"
+                    )
+                }
             }
             .id(image.id)
             .transition(.opacity)
@@ -1781,9 +1803,14 @@ struct ContentView: View {
         }
     }
 
+    /// 在线图对应的本地库条目：原图本地加载与设为壁纸共用。
+    private func localItem(for image: WallhavenImage) -> WallpaperItem? {
+        items.first { $0.wallhavenID == image.id }
+    }
+
     /// 已下载的在线图设为壁纸：按 wallhaven ID 定位本地条目后复用图库逻辑。
     private func setDownloadedImageAsWallpaper(_ image: WallhavenImage) {
-        guard let item = items.first(where: { $0.wallhavenID == image.id }) else { return }
+        guard let item = localItem(for: image) else { return }
         setDesktopWallpaper(item)
     }
 
