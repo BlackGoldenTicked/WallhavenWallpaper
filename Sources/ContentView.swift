@@ -730,6 +730,7 @@ struct ContentView: View {
                                         purity = .sfw
                                         draftPurity = .sfw
                                     }
+                                }
 
                             if allowNSFW {
                                 Toggle("Sketchy / NSFW 默认模糊", isOn: $blurNSFW)
@@ -1368,7 +1369,8 @@ struct ContentView: View {
     /// 已下载集合只算一次，避免在 ForEach 里重复构造。
     private var onlineFilmstripCells: some View {
         let downloadedIDs = self.downloadedIDs
-        return ForEach(onlineBuffer) { image in
+        let bufferCount = onlineBuffer.count
+        return ForEach(Array(onlineBuffer.enumerated()), id: \.element.id) { index, image in
             FilmstripCell(isSelected: image.id == currentOnlineImage?.id) {
                 CachedRemoteImageView(url: image.thumbs.large, maxPixelSize: LayoutMetrics.filmstripRemotePixelSize)
                     // 缩略图条不带揭示按钮，敏感图仅按设置模糊。
@@ -1385,6 +1387,12 @@ struct ContentView: View {
             .id(image.id)
             .onTapGesture {
                 jumpToOnline(image.id)
+            }
+            .onAppear {
+                // 缩略图滚入可视区即触发续页，无需点击最后一张
+                if index >= bufferCount - LayoutMetrics.loadMoreThreshold {
+                    triggerLoadMoreIfNeeded()
+                }
             }
             .contextMenu {
                 Button {
@@ -1616,8 +1624,13 @@ struct ContentView: View {
 
     /// 接近缓冲区末尾时静默续页；因为一次只展一张，追加不会造成布局跳动。
     private func afterAdvance() {
-        guard mainMode == .online, !isLoading, currentPage < lastPage else { return }
         guard onlineIndex >= onlineBuffer.count - LayoutMetrics.loadMoreThreshold else { return }
+        triggerLoadMoreIfNeeded()
+    }
+
+    /// 缩略图条滚动或方向键推进时，接近末尾即静默续页。
+    private func triggerLoadMoreIfNeeded() {
+        guard mainMode == .online, !isLoading, currentPage < lastPage else { return }
         Task { await loadPage(currentPage + 1, append: true) }
     }
 
