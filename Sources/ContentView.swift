@@ -362,7 +362,8 @@ struct ContentView: View {
                         maxPixelSize: pixelSize,
                         contentMode: .fill,
                         referer: image.url,
-                        loadingHint: "正在加载原图"
+                        loadingHint: "正在加载原图",
+                        placeholderURL: image.thumbs.large
                     )
                 }
             }
@@ -729,7 +730,6 @@ struct ContentView: View {
                                         purity = .sfw
                                         draftPurity = .sfw
                                     }
-                                }
 
                             if allowNSFW {
                                 Toggle("Sketchy / NSFW 默认模糊", isOn: $blurNSFW)
@@ -1115,7 +1115,8 @@ struct ContentView: View {
                         maxPixelSize: pixelSize,
                         contentMode: .fill,
                         referer: image.url,
-                        loadingHint: "正在加载原图"
+                        loadingHint: "正在加载原图",
+                        placeholderURL: image.thumbs.large
                     )
                 }
             }

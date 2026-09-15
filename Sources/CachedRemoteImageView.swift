@@ -114,6 +114,8 @@ struct CachedRemoteImageView: View {
     var referer: URL?
     /// 非空时在解码完成前显示转圈与提示；单张大图舞台用，缩略图条不用。
     var loadingHint: String?
+    /// 渐进加载：原图未到达前先铺低清图并随下载进度逐渐去模糊，到达后原图淡入交叉过渡。
+    var placeholderURL: URL?
 
     @State private var image: NSImage?
     @State private var didFail = false
@@ -126,13 +128,15 @@ struct CachedRemoteImageView: View {
         maxPixelSize: CGFloat = 700,
         contentMode: ContentMode = .fill,
         referer: URL? = nil,
-        loadingHint: String? = nil
+        loadingHint: String? = nil,
+        placeholderURL: URL? = nil
     ) {
         self.url = url
         self.maxPixelSize = maxPixelSize
         self.contentMode = contentMode
         self.referer = referer
         self.loadingHint = loadingHint
+        self.placeholderURL = placeholderURL
         // 预取命中时用内存缓存同步兜底：切换/重建视图首帧即有图，避免空帧闪动。
         let key = RemoteImageLoader.cacheKey(url: url, maxPixelSize: maxPixelSize)
         _image = State(initialValue: RemoteImageMemoryCache.shared.image(for: key))
@@ -140,16 +144,18 @@ struct CachedRemoteImageView: View {
 
     var body: some View {
         ZStack {
+            // 原图淡入期间保留低清层在下，形成模糊→清晰的交叉过渡。
+            if image == nil || placeholderURL != nil {
+                placeholder
+            }
             if let image {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
                     .transition(.opacity)
-            } else {
-                placeholder
             }
         }
-        .animation(.easeOut(duration: 0.18), value: isLoaded)
+        .animation(.easeOut(duration: 0.35), value: isLoaded)
         .task(id: taskKey) {
             await load()
         }
@@ -179,22 +185,40 @@ struct CachedRemoteImageView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
-        } else if let loadingHint {
-            VStack(spacing: 8) {
-                ProgressView()
+        } else {
+            ZStack {
+                if let placeholderURL {
+                    // 低清垫图：模糊半径随下载进度线性收敛，汇报间隔间用线性动画插值保证丝滑。
+                    CachedRemoteImageView(url: placeholderURL, maxPixelSize: 600, contentMode: contentMode)
+                        .blur(radius: progressiveBlurRadius)
+                        .animation(.linear(duration: 0.3), value: progressiveBlurRadius)
+                }
 
-                Text(loadingHint)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                if let loadingHint {
+                    VStack(spacing: 8) {
+                        ProgressView()
 
-                if receivedBytes > 0 {
-                    Text(downloadProgressText)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .monospacedDigit()
+                        Text(loadingHint)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+
+                        if receivedBytes > 0 {
+                            Text(downloadProgressText)
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.55))
+                                .monospacedDigit()
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// 模糊随下载进度逐渐收清：24 → 6；总大小未知时恒定中等模糊。
+    private var progressiveBlurRadius: CGFloat {
+        guard totalBytes > 0 else { return 18 }
+        let fraction = min(1, CGFloat(receivedBytes) / CGFloat(totalBytes))
+        return 24 - 18 * fraction
     }
 
     private var isLoaded: Bool {
